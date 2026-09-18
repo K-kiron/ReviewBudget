@@ -1,0 +1,3 @@
+include action.yml SECURITY.md
+recursive-include docs *.md
+recursive-include examples *.json *.jsonl *.toml

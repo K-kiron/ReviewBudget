@@ -1,0 +1,20 @@
+{
+  "repository": "example/service",
+  "number": 42,
+  "title": "Fix expired session handling",
+  "body": "## Summary\nReject expired sessions before reading the current account.\nFixes #38\n## Testing\nNot run.\n## Rollout\nTODO",
+  "head_sha": "cccccccccccccccccccccccccccccccccccccccc",
+  "base_sha": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "changed_files": 1,
+  "files_complete": true,
+  "synthetic": true,
+  "files": [
+    {
+      "filename": "src/auth/session.py",
+      "status": "modified",
+      "additions": 2,
+      "deletions": 0,
+      "patch": "@@ -1,1 +1,3 @@\n def current_account(session):\n+    if session.expired:\n+        raise ExpiredSession()"
+    }
+  ]
+}

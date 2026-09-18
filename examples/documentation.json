@@ -1,0 +1,20 @@
+{
+  "repository": "example/service",
+  "number": 41,
+  "title": "Clarify installation instructions",
+  "body": "## Summary\nClarify the supported Python version and installation commands.\n## Testing\nManually checked the commands in a clean environment.",
+  "head_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "base_sha": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "changed_files": 1,
+  "files_complete": true,
+  "synthetic": true,
+  "files": [
+    {
+      "filename": "docs/install.md",
+      "status": "modified",
+      "additions": 1,
+      "deletions": 1,
+      "patch": "@@ -1 +1 @@\n-Install Python.\n+Install Python 3.11 or later."
+    }
+  ]
+}
