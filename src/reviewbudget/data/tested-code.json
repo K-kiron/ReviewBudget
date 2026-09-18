@@ -1,0 +1,29 @@
+{
+  "repository": "example/reviewbudget-demo",
+  "number": 2,
+  "source": "synthetic_demo",
+  "synthetic": true,
+  "feature_timing": "synthetic",
+  "title": "Synthetic empty-input handling",
+  "body": "## Summary\nReturn an empty result when parsing an empty string, preserving integer parsing for other inputs.\n## Testing\nThe example unit suite exercises empty input and an ordinary integer; all example assertions pass. This is illustrative evidence, not a recorded test run.\n",
+  "head_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "base_sha": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "files": [
+    {
+      "filename": "src/parser.py",
+      "status": "modified",
+      "additions": 2,
+      "deletions": 0,
+      "patch": "@@ -1,2 +1,4 @@\n def parse(value):\n+    if value == \"\":\n+        return None\n     return int(value)\n"
+    },
+    {
+      "filename": "tests/test_parser.py",
+      "status": "added",
+      "additions": 5,
+      "deletions": 0,
+      "patch": "@@ -0,0 +1,5 @@\n+from src.parser import parse\n+\n+def test_empty_input():\n+    assert parse(\"\") is None\n+    assert parse(\"42\") == 42\n"
+    }
+  ],
+  "changed_files": 2,
+  "files_complete": true
+}

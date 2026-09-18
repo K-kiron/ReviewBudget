@@ -1,0 +1,29 @@
+{
+  "repository": "example/reviewbudget-demo",
+  "number": 4,
+  "source": "synthetic_demo",
+  "synthetic": true,
+  "feature_timing": "synthetic",
+  "title": "Synthetic session expiry migration and dependency update",
+  "body": "## Summary\nAdd expiry timestamps to stored sessions and update the fictional storage dependency used by this demo.\n## Testing\nThe example migration is reviewed against an isolated fixture with existing sessions; no real service or dependency is changed.\n## Dependency rationale\nThe fictional storage update supplies the timestamp binding needed by this example migration.\n## Migration\nAdd a nullable expiry column before backfilling existing sessions; older readers continue to work while the application is upgraded.\n## Rollout\nBack up session data and validate the backfill in staging. Roll back application reads before removing the newly added column.\n",
+  "head_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "base_sha": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "files": [
+    {
+      "filename": "db/migrations/003_session_expiry.sql",
+      "status": "added",
+      "additions": 2,
+      "deletions": 0,
+      "patch": "@@ -0,0 +1,2 @@\n+ALTER TABLE sessions ADD COLUMN expires_at TIMESTAMP NULL;\n+UPDATE sessions SET expires_at = created_at + INTERVAL '30 days';\n"
+    },
+    {
+      "filename": "pyproject.toml",
+      "status": "modified",
+      "additions": 1,
+      "deletions": 1,
+      "patch": "@@ -1,2 +1,2 @@\n [project]\n-dependencies = [\"example-storage==1.0.0\"]\n+dependencies = [\"example-storage==1.1.0\"]\n"
+    }
+  ],
+  "changed_files": 2,
+  "files_complete": true
+}
