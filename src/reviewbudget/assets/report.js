@@ -153,14 +153,14 @@
     let warning = false;
     if (budget.status === "not_configured" || !report.checks?.length) {
       state = "Check catalog not configured. Required capabilities are listed below.";
+    } else if (budget.within_budget === false || budget.status === "over_budget") {
+      state = `Over budget${priced(budget.shortfall_minutes) ? ` by ${priced(selected) ? "" : "at least "}${amount(budget.shortfall_minutes)} min` : ""}. Required checks remain selected.${priced(selected) ? "" : " The complete cost is still unknown."}`;
+      warning = true;
     } else if ((budget.unmapped_capabilities || []).length) {
       state = "Coverage gap: required capabilities have no configured check. Budget fit is unknown.";
       warning = true;
     } else if (!priced(selected)) {
       state = "Price all selected checks before judging whether this plan fits the budget.";
-      warning = true;
-    } else if (budget.within_budget === false || budget.status === "over_budget") {
-      state = `Over budget${priced(budget.shortfall_minutes) ? ` by ${amount(budget.shortfall_minutes)} min` : ""}. Required checks remain selected.`;
       warning = true;
     } else if (priced(budget.limit_minutes)) {
       state = `${amount(selected)} min selected / ${amount(budget.limit_minutes)} min budget. ${priced(budget.remaining_minutes) ? `${amount(budget.remaining_minutes)} min remains.` : "Fit is not established."}`;
@@ -334,7 +334,7 @@
     notice.textContent = imported
       ? "LOCAL IMPORT · Values and provenance are supplied by this file and have not been independently verified. The report stays in this tab; no network requests or persistent storage."
       : synthetic
-        ? "SYNTHETIC EXAMPLE · This is a worked scenario, not a customer result or a measured saving. Change scenarios to inspect the planner's tradeoffs."
+        ? "SYNTHETIC EXAMPLE · This is a worked scenario, not a customer result or a measured saving. Inspect the selected checks and their reasons."
         : "ADVISORY REPORT · Check estimates and source identity before acting. This report does not execute checks or change repository requirements.";
     document.title = `ReviewBudget — ${report.title || `${report.repository} #${report.number}`}`;
   }
