@@ -9,3 +9,7 @@ htmlcov/
 .pytest_cache/
 reviewbudget-report.*
 history.local.jsonl
+*.jsonl.checkpoint/
+preview/
+release/
+auth-report.json

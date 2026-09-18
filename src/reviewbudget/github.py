@@ -182,7 +182,7 @@ class GitHubClient:
             "base_sha": before["base"]["sha"], "changed_files": before["changed_files"],
             "files_complete": len(files) == before["changed_files"], "files": files,
             "captured_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
-            "feature_timing": "final_state", "synthetic": False,
+            "feature_timing": "final_state", "synthetic": False, "source": "github_rest",
         }
         return snapshot, after
 
@@ -192,6 +192,10 @@ class GitHubClient:
         Reviews are submitted review events, not unique reviewers or review rounds.
         This retrospective collection cannot establish opening-time feature values.
         """
+        return [self.fetch_history_record(repository, number) for number in self.closed_numbers(repository, limit)]
+
+    def closed_numbers(self, repository: str, limit: int = 100) -> list[int]:
+        """Freeze a cohort before collecting its individual records."""
         repository, _ = parse_pr_url(f"{repository}#1")
         _integer(limit, "history limit", 1)
         if limit > 1000:
@@ -208,40 +212,55 @@ class GitHubClient:
             if number in numbers:
                 raise GitHubError("Pull request listing changed during pagination; retry collection.")
             numbers.append(number)
-        records = []
-        for number in numbers:
-            snapshot, pr = self._capture_pr(repository, number)
-            outcome = self._outcome_metadata(pr)
-            reviews = list(self._paginate(f"{path}/{number}/reviews"))
-            submitted = []
-            ids = set()
-            for review in reviews:
-                if not isinstance(review, dict):
-                    raise GitHubError("GitHub API returned an invalid review.")
-                review_id = _integer(review.get("id"), "review identifier", 1)
-                state = review.get("state")
-                if not isinstance(state, str) or state not in {"PENDING", "APPROVED", "CHANGES_REQUESTED", "COMMENTED", "DISMISSED"}:
-                    raise GitHubError("GitHub API returned an invalid review state.")
-                if review_id in ids:
-                    raise GitHubError("Review listing changed during pagination; retry collection.")
-                ids.add(review_id)
-                if state != "PENDING":
-                    _timestamp(review.get("submitted_at"), "review submission", nullable=True)
-                    submitted.append(review)
-            final, _ = self._get_json(f"{path}/{number}")
-            final = _validate_pr(final, number)
-            if _version(pr) != _version(final) or outcome != self._outcome_metadata(final):
-                raise GitHubError("Pull request changed during capture; retry for a consistent snapshot.")
-            dates = [review.get("submitted_at") for review in submitted]
-            first_review = min(dates, key=lambda value: datetime.fromisoformat(value.replace("Z", "+00:00"))) if dates and all(dates) else None
-            outcome.update({
-                "review_count": len(submitted),
-                "changes_requested": sum(review["state"] == "CHANGES_REQUESTED" for review in submitted),
-                "first_review_at": first_review,
-            })
-            records.append({"snapshot": snapshot, "outcome": outcome,
-                            "feature_timing": "final_state", "synthetic": False})
-        return records
+        return numbers
+
+    def _submitted_reviews(self, repository, number):
+        reviews = list(self._paginate(f"/repos/{repository}/pulls/{number}/reviews"))
+        submitted, ids = [], set()
+        for review in reviews:
+            if not isinstance(review, dict):
+                raise GitHubError("GitHub API returned an invalid review.")
+            review_id = _integer(review.get("id"), "review identifier", 1)
+            state = review.get("state")
+            if not isinstance(state, str) or state not in {"PENDING", "APPROVED", "CHANGES_REQUESTED", "COMMENTED", "DISMISSED"}:
+                raise GitHubError("GitHub API returned an invalid review state.")
+            if review_id in ids:
+                raise GitHubError("Review listing changed during pagination; retry collection.")
+            ids.add(review_id)
+            if state != "PENDING":
+                _timestamp(review.get("submitted_at"), "review submission", nullable=True)
+                submitted.append(review)
+        return submitted
+
+    def fetch_history_record(self, repository: str, number: int) -> dict:
+        snapshot, pr = self._capture_pr(repository, number)
+        outcome = self._outcome_metadata(pr)
+        submitted = self._submitted_reviews(repository, number)
+        final, _ = self._get_json(f"/repos/{repository}/pulls/{number}")
+        final = _validate_pr(final, number)
+        if _version(pr) != _version(final) or outcome != self._outcome_metadata(final):
+            raise GitHubError("Pull request changed during capture; retry for a consistent snapshot.")
+        dates = [review.get("submitted_at") for review in submitted]
+        first_review = min(dates, key=lambda value: datetime.fromisoformat(value.replace("Z", "+00:00"))) if dates and all(dates) else None
+        outcome.update({"review_count": len(submitted),
+                        "changes_requested": sum(review["state"] == "CHANGES_REQUESTED" for review in submitted),
+                        "first_review_at": first_review})
+        return {"snapshot": snapshot, "outcome": outcome,
+                "feature_timing": "final_state", "synthetic": False}
+
+    def capture_pr(self, repository: str, number: int) -> dict:
+        """Preserve evidence now, marking pre-review only when no review exists."""
+        snapshot, pr = self._capture_pr(repository, number)
+        reviews = self._submitted_reviews(repository, number)
+        final, _ = self._get_json(f"/repos/{repository}/pulls/{number}")
+        final = _validate_pr(final, number)
+        if _version(pr) != _version(final) or pr.get("state") != final.get("state"):
+            raise GitHubError("Pull request changed during capture; retry for a consistent snapshot.")
+        snapshot["feature_timing"] = "pre_review" if not reviews and pr.get("state") == "open" else "final_state"
+        snapshot["provenance"] = {"capture_method": "github_rest_with_review_check",
+                                   "submitted_reviews_at_capture": len(reviews),
+                                   "state_at_capture": pr.get("state")}
+        return snapshot
 
     @staticmethod
     def _outcome_metadata(pr: dict) -> dict:
@@ -273,8 +292,13 @@ class GitHubClient:
             except ValueError:
                 raise GitHubError("GitHub API returned an invalid pagination link.") from None
             expected_query = {key: [str(value)] for key, value in {**query, "page": page + 1}.items()}
+            suffix = re.fullmatch(r"/repos/[^/]+/[^/]+(/pulls(?:/[1-9][0-9]*(?:/files|/reviews)?)?)", path)
+            canonical_path = bool(suffix and re.fullmatch(r"/repositories/[1-9][0-9]*" + re.escape(suffix[1]), next_url.path))
+            # GitHub may canonicalize a repository name to its numeric ID.
+            # Never follow that URL: the next iteration reconstructs the
+            # request from the original repository and validated page number.
             if (next_url.scheme != "https" or next_url.netloc != "api.github.com"
-                    or next_url.path != path or next_url.fragment
+                    or (next_url.path != path and not canonical_path) or next_url.fragment
                     or parse_qs(next_url.query) != expected_query):
                 raise GitHubError("GitHub API returned an unsafe or inconsistent pagination link.")
         if not truncate:

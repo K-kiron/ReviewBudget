@@ -13,7 +13,26 @@ inputs:
     description: Optional trusted TOML policy path. Never auto-loaded from a pull request.
     required: false
     default: ''
+  artifact-directory:
+    description: Optional trusted output directory for report.json, report.html, and the original snapshot.json. Snapshot files may contain private code.
+    required: false
+    default: ''
 outputs:
+  selected-checks:
+    description: JSON array of selected configured check IDs.
+    value: ${{ steps.plan.outputs.selected-checks }}
+  coverage-complete:
+    description: Whether configured checks map every required capability and input is complete. This does not prove coverage or passing tests.
+    value: ${{ steps.plan.outputs.coverage-complete }}
+  budget-status:
+    description: Budget accounting state, including unpriced or over-budget work.
+    value: ${{ steps.plan.outputs.budget-status }}
+  estimated-minutes:
+    description: Sum of declared selected-check minutes; blank when unknown.
+    value: ${{ steps.plan.outputs.estimated-minutes }}
+  budget-shortfall:
+    description: Known mandatory cost exceeding the limit; blank without a limit.
+    value: ${{ steps.plan.outputs.budget-shortfall }}
   tier:
     description: Recommended verification tier, from 0 to 3.
     value: ${{ steps.plan.outputs.tier }}
@@ -46,4 +65,5 @@ runs:
       env:
         REVIEWBUDGET_TOKEN: ${{ inputs.token }}
         REVIEWBUDGET_POLICY: ${{ inputs.policy }}
+        REVIEWBUDGET_ARTIFACT_DIR: ${{ inputs.artifact-directory }}
       run: python -I "$GITHUB_ACTION_PATH/src/reviewbudget/action.py"

@@ -1,0 +1,211 @@
+{
+  "schema_version": 1,
+  "verdict": "unvalidated",
+  "evidence_status": "exploratory",
+  "product_claims_supported": false,
+  "label": {
+    "name": "observed_review_burden_proxy",
+    "formula": "review_count + 2 * changes_requested + review_comments",
+    "positive_rule": "strictly greater than training 80th percentile; boundary ties excluded",
+    "interpretation": "Observed review activity only; not defects, correctness, time, or cost"
+  },
+  "data": {
+    "input_records": 300,
+    "usable_records": 299,
+    "excluded_malformed_records": 1,
+    "malformed_reasons": {
+      "invalid_first_review_order": 1
+    },
+    "duplicate_identities": 0,
+    "excluded_duplicate_records": 0
+  },
+  "split": {
+    "strategy": "global_pr_created_at_chronological; equal timestamps stay together",
+    "requested_holdout_fraction": 0.3,
+    "holdout_start": "2026-08-03T16:54:57+00:00",
+    "train_count": 203,
+    "holdout_count": 90,
+    "excluded_overlapping_outcomes": 6,
+    "training_outcome_rule": "closed_at and merged_at, when present, must both precede holdout_start",
+    "repositories_in_both_partitions": [
+      "cli/cli",
+      "pallets/flask",
+      "psf/requests"
+    ]
+  },
+  "training": {
+    "burden_threshold": 2.0,
+    "target_recall": 0.85,
+    "planner_score_cutoff": 32,
+    "baseline_score_cutoff": 15,
+    "positive_count": 35,
+    "negative_count": 168
+  },
+  "holdout": {
+    "positive_count": 23,
+    "negative_count": 67,
+    "unlabeled_count": 0
+  },
+  "planner": {
+    "top20": {
+      "selected_count": 18,
+      "precision": 0.6666666666666666,
+      "recall": 0.5217391304347826,
+      "boundary_tie_count": 3,
+      "boundary_tie_weight": 0.3333333333333333,
+      "tie_handling": "fractional_expectation"
+    },
+    "trained_cutoff": {
+      "selected_count": 65,
+      "selected_share": 0.7222222222222222,
+      "precision": 0.2923076923076923,
+      "recall": 0.8260869565217391
+    }
+  },
+  "baseline": {
+    "definition": "sum(additions + deletions) + changed_files",
+    "top20": {
+      "selected_count": 18,
+      "precision": 0.6666666666666666,
+      "recall": 0.5217391304347826,
+      "boundary_tie_count": 1,
+      "boundary_tie_weight": 1.0,
+      "tie_handling": "fractional_expectation"
+    },
+    "trained_cutoff": {
+      "selected_count": 48,
+      "selected_share": 0.5333333333333333,
+      "precision": 0.3958333333333333,
+      "recall": 0.8260869565217391
+    }
+  },
+  "routing": {
+    "high_burden_recall": 0.6956521739130435,
+    "cheap_share": 0.5,
+    "expensive_review_share": 0.5,
+    "definition": "Tier 0/1 cheap; Tier 2/3 selected for deeper review; observed planner tiers only"
+  },
+  "comparison": {
+    "relative_precision_lift": 0.0,
+    "lift_definition": "(planner precision@top20 - baseline precision@top20) / baseline precision@top20",
+    "zero_baseline_rule": "relative lift is undefined and cannot pass its gate"
+  },
+  "gates": {
+    "high_burden_recall": {
+      "observed": 0.6956521739130435,
+      "minimum": 0.85,
+      "passed": false
+    },
+    "cheap_share": {
+      "observed": 0.5,
+      "minimum": 0.3,
+      "passed": true
+    },
+    "relative_precision_lift": {
+      "observed": 0.0,
+      "minimum": 0.15,
+      "passed": false
+    }
+  },
+  "limitations": [
+    "feature_timing_not_pre_review",
+    "fewer_than_300_evaluated_records",
+    "first_review_time_missing",
+    "malformed_records_excluded",
+    "planner_input_incomplete",
+    "snapshot_captured_after_first_review"
+  ],
+  "per_repository": {
+    "cli/cli": {
+      "train_count": 38,
+      "holdout_count": 59,
+      "positive_count": 23,
+      "unlabeled_count": 0,
+      "planner_top20": {
+        "selected_count": 12,
+        "precision": 0.9166666666666666,
+        "recall": 0.4782608695652174,
+        "boundary_tie_count": 1,
+        "boundary_tie_weight": 1.0,
+        "tie_handling": "fractional_expectation"
+      },
+      "baseline_top20": {
+        "selected_count": 12,
+        "precision": 0.6666666666666666,
+        "recall": 0.34782608695652173,
+        "boundary_tie_count": 1,
+        "boundary_tie_weight": 1.0,
+        "tie_handling": "fractional_expectation"
+      },
+      "routing": {
+        "high_burden_recall": 0.6956521739130435,
+        "cheap_share": 0.3728813559322034,
+        "expensive_review_share": 0.6271186440677966,
+        "definition": "Tier 0/1 cheap; Tier 2/3 selected for deeper review; observed planner tiers only"
+      }
+    },
+    "pallets/flask": {
+      "train_count": 73,
+      "holdout_count": 25,
+      "positive_count": 0,
+      "unlabeled_count": 0,
+      "planner_top20": {
+        "selected_count": 5,
+        "precision": 0.0,
+        "recall": null,
+        "boundary_tie_count": 2,
+        "boundary_tie_weight": 0.5,
+        "tie_handling": "fractional_expectation"
+      },
+      "baseline_top20": {
+        "selected_count": 5,
+        "precision": 0.0,
+        "recall": null,
+        "boundary_tie_count": 1,
+        "boundary_tie_weight": 1.0,
+        "tie_handling": "fractional_expectation"
+      },
+      "routing": {
+        "high_burden_recall": null,
+        "cheap_share": 0.92,
+        "expensive_review_share": 0.08,
+        "definition": "Tier 0/1 cheap; Tier 2/3 selected for deeper review; observed planner tiers only"
+      }
+    },
+    "psf/requests": {
+      "train_count": 92,
+      "holdout_count": 6,
+      "positive_count": 0,
+      "unlabeled_count": 0,
+      "planner_top20": {
+        "selected_count": 2,
+        "precision": 0.0,
+        "recall": null,
+        "boundary_tie_count": 5,
+        "boundary_tie_weight": 0.2,
+        "tie_handling": "fractional_expectation"
+      },
+      "baseline_top20": {
+        "selected_count": 2,
+        "precision": 0.0,
+        "recall": null,
+        "boundary_tie_count": 6,
+        "boundary_tie_weight": 0.3333333333333333,
+        "tie_handling": "fractional_expectation"
+      },
+      "routing": {
+        "high_burden_recall": null,
+        "cheap_share": 0.0,
+        "expensive_review_share": 1.0,
+        "definition": "Tier 0/1 cheap; Tier 2/3 selected for deeper review; observed planner tiers only"
+      }
+    }
+  },
+  "interpretation": [
+    "Research screening gates only; passing does not establish statistical significance or generalization.",
+    "No observed or simulated cost savings are claimed; Tier 0/1 share is a routing count only.",
+    "The policy is fixed; only label and diagnostic ranking cutoffs are fitted on training data.",
+    "Final-state snapshots, unknown provenance, and synthetic examples are exploratory only.",
+    "Provenance is caller supplied and must be audited against historical revisions before relying on results."
+  ]
+}

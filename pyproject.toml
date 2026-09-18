@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "reviewbudget"
-version = "0.1.0"
+version = "0.2.0"
 description = "Allocate pull request verification effort from structural risk and evidence debt."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -13,7 +13,7 @@ license-files = ["LICENSE"]
 authors = [{name = "Wenhao XU"}]
 dependencies = []
 classifiers = [
-  "Development Status :: 3 - Alpha",
+  "Development Status :: 4 - Beta",
   "Programming Language :: Python :: 3",
   "Programming Language :: Python :: 3.11",
 ]
@@ -27,3 +27,6 @@ Issues = "https://github.com/K-kiron/ReviewBudget/issues"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+reviewbudget = ["data/*.json", "data/*.toml", "assets/*.css", "assets/*.js"]

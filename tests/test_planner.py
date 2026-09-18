@@ -30,6 +30,113 @@ def file(path, **overrides):
 
 
 class PlannerTests(unittest.TestCase):
+    def test_invalid_capture_metadata_is_rejected_without_copying_it(self):
+        for overrides in [
+            {"merge_base_sha": "not-a-sha"}, {"merge_base_sha": 123},
+            {"provenance": {"diff_basis": "C:/private/path"}},
+            {"provenance": {"working_tree_included": "false"}},
+            {"provenance": {"submitted_reviews_at_capture": True}},
+            {"provenance": {"submitted_reviews_at_capture": -1}},
+        ]:
+            with self.subTest(overrides=overrides), self.assertRaises(ValueError):
+                analyze(snapshot(**overrides))
+
+    def test_local_capture_provenance_is_preserved_without_private_fields(self):
+        provenance = {"diff_basis": "merge_base", "working_tree_included": False,
+                      "number_is_placeholder": True, "capture_method": "git_diff",
+                      "submitted_reviews_at_capture": 0, "state_at_capture": "local",
+                      "directory": "C:/private/work", "credentials": "not-a-real-secret"}
+        report = analyze(snapshot(merge_base_sha="c" * 40, provenance=provenance))
+        self.assertEqual(report["merge_base_sha"], "c" * 40)
+        for key in set(provenance) - {"directory", "credentials"}:
+            self.assertEqual(report["provenance"][key], provenance[key])
+        self.assertNotIn("directory", report["provenance"])
+        self.assertNotIn("credentials", report["provenance"])
+        changed = copy.deepcopy(provenance)
+        changed["diff_basis"] = "base_to_head"
+        self.assertNotEqual(report["report_fingerprint"], analyze(snapshot(merge_base_sha="c" * 40, provenance=changed))["report_fingerprint"])
+
+    def test_incomplete_input_selects_every_check_even_outside_paths_and_budget(self):
+        policy = {"checks": [
+            {"id": "unrelated", "name": "Unobserved service tests", "covers": [], "paths": ["services/*"], "estimated_minutes": 40},
+            {"id": "unknown", "name": "Unpriced review", "covers": ["human_review"], "paths": ["other/*"]},
+        ], "budget": {"limit_minutes": 1}}
+        for value in [snapshot(files_complete=False), snapshot([file("README.md", patch=None)]), snapshot(head_sha=None), snapshot([])]:
+            with self.subTest(value=value):
+                report = analyze(value, policy)
+                self.assertTrue(all(c["selected"] and c["mandatory"] and c["applicable"] for c in report["checks"]))
+                self.assertEqual(report["budget"]["shortfall_minutes"], 39)
+                self.assertIsNone(report["budget"]["estimated_minutes"])
+                self.assertIn("unknown", report["budget"]["unpriced_checks"])
+
+    def test_recommended_capabilities_are_selected_or_explicitly_unmapped(self):
+        report = analyze(snapshot([file("src/auth.py")]), {"checks": [
+            {"id": "lint", "name": "Lint", "covers": ["format_and_lint"], "estimated_minutes": 1},
+            {"id": "wrong-path-security", "name": "Other service security", "covers": ["security_review"], "paths": ["other/*"], "estimated_minutes": 20},
+        ], "budget": {"limit_minutes": 100}})
+        self.assertEqual(report["tier"], 3)
+        covered = {cap for c in report["checks"] if c["selected"] for cap in c["covers"]}
+        gaps = set(report["budget"]["unmapped_capabilities"])
+        self.assertEqual(set(report["plan"]["required"]), covered | gaps)
+        self.assertIn("security_review", gaps)
+        self.assertIsNone(report["budget"]["within_budget"])
+        self.assertIsNone(report["budget"]["modeled_savings_minutes"])
+
+    def test_rename_matches_old_and_new_paths_case_insensitively(self):
+        report = analyze(snapshot([file("docs/new.md", status="renamed", previous_filename="Docs/old.md")]), {"checks": [
+            {"id": "old-docs", "name": "Old documentation validator", "covers": ["format_and_lint"], "paths": ["docs/old.md"], "estimated_minutes": 1},
+        ]})
+        self.assertTrue(report["checks"][0]["selected"])
+        self.assertEqual(report["checks"][0]["matched_paths"], ["Docs/old.md"])
+        self.assertEqual(report["budget"]["unmapped_capabilities"], [])
+
+    def test_default_analysis_does_not_invent_repository_checks_or_estimates(self):
+        report = analyze(snapshot())
+        self.assertEqual(report["checks"], [])
+        self.assertEqual(report["budget"]["status"], "not_configured")
+        self.assertIsNone(report["budget"]["estimated_minutes"])
+        self.assertIsNone(report["budget"]["full_baseline_minutes"])
+        self.assertEqual(report["budget"]["unmapped_capabilities"], report["plan"]["required"])
+
+    def test_report_exposes_safe_metadata_and_reproducible_fingerprint(self):
+        value = snapshot(source="offline", synthetic=True, feature_timing="pre_review", captured_at="2026-01-01T10:00:00Z")
+        result = analyze(value)
+        self.assertEqual(result["title"], value["title"])
+        self.assertEqual(result["provenance"], {k: value[k] for k in ("source", "synthetic", "feature_timing", "captured_at")})
+        self.assertEqual(result["stats"], {"files": 2, "lines": 18, "additions": 16, "deletions": 2})
+        self.assertEqual([f["classification"] for f in result["files"]], ["source", "test"])
+        self.assertNotIn("body", result)
+        self.assertTrue(all("patch" not in item for item in result["files"]))
+        self.assertEqual(result["report_fingerprint"], analyze(value)["report_fingerprint"])
+        self.assertNotEqual(result["report_fingerprint"], analyze(snapshot(title="A different intent"))["report_fingerprint"])
+
+    def test_optional_upgrades_use_priority_and_remaining_declared_budget(self):
+        result = analyze(snapshot([file("docs/usage.md")]), {"checks": [
+            {"id": "lint", "name": "Lint", "covers": ["format_and_lint"], "estimated_minutes": 1},
+            {"id": "unit", "name": "Unit tests", "covers": ["unit_tests"], "estimated_minutes": 3, "priority": 10},
+            {"id": "integration", "name": "Integration", "covers": ["integration_tests"], "estimated_minutes": 2, "priority": 20},
+        ], "budget": {"limit_minutes": 5}})
+        self.assertEqual({c["id"] for c in result["checks"] if c["selected"]}, {"lint", "integration"})
+        self.assertEqual(result["budget"]["estimated_minutes"], 3)
+        self.assertEqual(result["budget"]["full_baseline_minutes"], 6)
+        self.assertEqual(result["budget"]["modeled_savings_minutes"], 3)
+        self.assertIn("budget", next(c for c in result["checks"] if c["id"] == "unit")["reasons"][-1])
+
+    def test_named_required_checks_survive_insufficient_budget(self):
+        result = analyze(snapshot(), {"checks": [
+            {"id": "lint", "name": "Ruff lint", "covers": ["format_and_lint"], "estimated_minutes": 2},
+            {"id": "unit", "name": "Parser tests", "covers": ["unit_tests"], "estimated_minutes": 8},
+            {"id": "review", "name": "Maintainer review", "covers": ["light_review"], "estimated_minutes": 5},
+            {"id": "license", "name": "License policy", "covers": [], "paths": ["never/*"],
+             "estimated_minutes": 1, "required": True},
+        ], "budget": {"limit_minutes": 3}})
+        self.assertEqual(result["tier"], 1)
+        self.assertEqual({c["id"] for c in result["checks"] if c["selected"]}, {"lint", "unit", "review", "license"})
+        self.assertTrue(all(c["mandatory"] for c in result["checks"]))
+        self.assertEqual(result["budget"]["shortfall_minutes"], 13)
+        self.assertEqual(result["budget"]["unmapped_capabilities"], [])
+        self.assertFalse(result["budget"]["within_budget"])
+
     def test_small_tested_change_gets_light_verification(self):
         result = analyze(snapshot())
         self.assertEqual(result["tier"], 1)

@@ -1,0 +1,75 @@
+# Python verification policy. All estimates below are illustrative, not measured.
+# Replace the check names and estimates with your trusted project checks and data.
+# Commands in names are suggestions only; ReviewBudget never executes them.
+# Load this policy explicitly with --policy .reviewbudget.toml.
+# Adjust the starter path patterns for your repository before using the policy.
+# Mandatory checks and safety floors remain required even above the budget.
+thresholds = [20, 45, 70]
+sensitive_paths = []
+
+[budget]
+limit_minutes = 45
+
+[[checks]]
+id = "lint"
+name = "Python lint and formatting (your configured lint checks)"
+covers = ["format_and_lint"]
+estimated_minutes = 2
+required = true
+priority = 100
+
+[[checks]]
+id = "unit-tests"
+name = "Unit tests: python -m unittest discover -s tests"
+covers = ["unit_tests"]
+paths = ["src/*", "app/*", "lib/*", "tests/*", "db/*", "*.json", "*.yml", "*.yaml", "*.sql", "*.tf", "Dockerfile*", "*.py", "*.toml", "*.cfg", "*.ini", "requirements*.txt"]
+estimated_minutes = 5
+priority = 90
+
+[[checks]]
+id = "light-review"
+name = "Focused review of changed behavior and tests"
+covers = ["light_review"]
+paths = ["src/*", "app/*", "lib/*", "tests/*", "db/*", "*.json", "*.yml", "*.yaml", "*.sql", "*.tf", "Dockerfile*", "*.py", "*.toml", "*.cfg", "*.ini", "requirements*.txt"]
+estimated_minutes = 8
+priority = 60
+
+[[checks]]
+id = "comprehensive-review"
+name = "Review behavior, edge cases, and compatibility"
+covers = ["comprehensive_review"]
+paths = ["src/*", "app/*", "lib/*", "tests/*", "db/*", "*.json", "*.yml", "*.yaml", "*.sql", "*.tf", "Dockerfile*", "*.py", "*.toml", "*.cfg", "*.ini", "requirements*.txt"]
+estimated_minutes = 15
+priority = 50
+
+[[checks]]
+id = "integration-tests"
+name = "Project integration suite against isolated test services"
+covers = ["integration_tests"]
+paths = ["src/*", "app/*", "lib/*", "tests/*", "db/*", "*.json", "*.yml", "*.yaml", "*.sql", "*.tf", "Dockerfile*", "*.py", "*.toml", "*.cfg", "*.ini", "requirements*.txt"]
+estimated_minutes = 15
+priority = 70
+
+[[checks]]
+id = "e2e-tests"
+name = "End-to-end tests of the affected user workflows"
+covers = ["e2e_tests"]
+paths = ["src/*", "app/*", "lib/*", "tests/*", "db/*", "*.json", "*.yml", "*.yaml", "*.sql", "*.tf", "Dockerfile*", "*.py", "*.toml", "*.cfg", "*.ini", "requirements*.txt"]
+estimated_minutes = 20
+priority = 40
+
+[[checks]]
+id = "security-review"
+name = "Security review of authorization, secrets, and trust boundaries"
+covers = ["security_review"]
+paths = ["src/*", "app/*", "lib/*", "tests/*", "db/*", "*.json", "*.yml", "*.yaml", "*.sql", "*.tf", "Dockerfile*", "*.py", "*.toml", "*.cfg", "*.ini", "requirements*.txt"]
+estimated_minutes = 30
+priority = 30
+
+[[checks]]
+id = "human-review"
+name = "Maintainer review and approval"
+covers = ["human_review"]
+paths = ["src/*", "app/*", "lib/*", "tests/*", "db/*", "*.json", "*.yml", "*.yaml", "*.sql", "*.tf", "Dockerfile*", "*.py", "*.toml", "*.cfg", "*.ini", "requirements*.txt"]
+estimated_minutes = 20
+priority = 20

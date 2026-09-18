@@ -1,0 +1,64 @@
+# Illustrative estimates, not observed runtimes. Replace names and estimates
+# with your repository's checks. This file never executes the named commands.
+thresholds = [20, 45, 70]
+sensitive_paths = ["src/payments/*"]
+
+[budget]
+limit_minutes = 30
+
+[[checks]]
+id = "lint"
+name = "Format and lint validation"
+covers = ["format_and_lint"]
+paths = ["*"]
+estimated_minutes = 2
+required = true
+priority = 100
+
+[[checks]]
+id = "unit"
+name = "Unit tests: python -m unittest discover -s tests"
+covers = ["unit_tests"]
+paths = ["*"]
+estimated_minutes = 6
+priority = 80
+
+[[checks]]
+id = "maintainer-review"
+name = "Maintainer review of implementation and test coverage"
+covers = ["light_review", "comprehensive_review"]
+paths = ["*"]
+estimated_minutes = 10
+priority = 70
+
+[[checks]]
+id = "integration"
+name = "Service integration suite"
+covers = ["integration_tests"]
+paths = ["*"]
+estimated_minutes = 15
+priority = 60
+
+[[checks]]
+id = "end-to-end"
+name = "Critical user journeys"
+covers = ["e2e_tests"]
+paths = ["*"]
+estimated_minutes = 20
+priority = 50
+
+[[checks]]
+id = "security"
+name = "Security owner review"
+covers = ["security_review"]
+paths = ["*"]
+estimated_minutes = 25
+priority = 40
+
+[[checks]]
+id = "human-approval"
+name = "Independent human approval"
+covers = ["human_review"]
+paths = ["*"]
+estimated_minutes = 20
+priority = 30
