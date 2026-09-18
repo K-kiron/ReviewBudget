@@ -21,6 +21,27 @@
   const append = (parent, ...children) => { parent.append(...children); return parent; };
   const attr = (node, key, value) => { node.setAttribute(key, String(value)); return node; };
   const strings = value => Array.isArray(value) && value.every(item => typeof item === "string");
+  const isSynthetic = report => (report.provenance?.synthetic ?? report.synthetic) === true;
+  const isLocal = report => (report.provenance?.source || report.source) === "local_git";
+  const identity = report => isLocal(report)
+    ? `${report.repository} / local diff · base ${(report.base_sha || "unknown").slice(0, 8)} / head ${(report.head_sha || "unknown").slice(0, 8)}`
+    : `${report.repository} / PR #${report.number}`;
+
+  function validateBudget(budget) {
+    if (!object(budget)) throw new Error("Invalid budget summary.");
+    for (const key of ["limit_minutes", "mandatory_known_minutes", "selected_known_minutes",
+      "estimated_minutes", "shortfall_minutes", "remaining_minutes", "full_baseline_minutes", "baseline_known_minutes", "modeled_savings_minutes", "queue_limit_minutes"]) {
+      if (budget[key] !== undefined && budget[key] !== null && !priced(budget[key])) throw new Error(`Invalid budget ${human(key)}.`);
+    }
+    for (const key of ["unmapped_capabilities", "unpriced_checks", "unpriced_configured_checks"]) {
+      if (budget[key] !== undefined && !strings(budget[key])) throw new Error(`Invalid ${human(key)}.`);
+    }
+    if (budget.within_budget !== undefined && budget.within_budget !== null
+        && typeof budget.within_budget !== "boolean") throw new Error("Invalid budget fit state.");
+    for (const key of ["estimate_basis", "baseline_basis", "status", "scope"]) {
+      if (budget[key] !== undefined && typeof budget[key] !== "string") throw new Error(`Invalid budget ${human(key)}.`);
+    }
+  }
 
   function validateReport(report) {
     const fail = message => { throw new Error(message); };
@@ -56,7 +77,7 @@
         || report.drivers.some(driver => !object(driver) || typeof driver.signal !== "string"
           || typeof driver.message !== "string" || !strings(driver.paths))) fail("Invalid change drivers.");
     if (report.title !== undefined && typeof report.title !== "string" && report.title !== null) fail("Report title must be text.");
-    for (const key of ["demo_label", "head_sha", "base_sha", "policy_hash"]) {
+    for (const key of ["demo_label", "head_sha", "base_sha", "merge_base_sha", "policy_hash", "report_fingerprint", "source"]) {
       if (report[key] !== undefined && report[key] !== null && typeof report[key] !== "string") fail(`Invalid ${human(key)}.`);
     }
     if (typeof report.input_complete !== "boolean") fail("Input completeness must be a boolean.");
@@ -88,22 +109,47 @@
         ids.add(check.id);
       }
     }
-    if (report.budget !== undefined) {
-      if (!object(report.budget)) fail("Invalid budget summary.");
-      for (const key of ["limit_minutes", "mandatory_known_minutes", "selected_known_minutes",
-        "estimated_minutes", "shortfall_minutes", "remaining_minutes", "full_baseline_minutes", "baseline_known_minutes", "modeled_savings_minutes"]) {
-        if (report.budget[key] !== undefined && report.budget[key] !== null && !priced(report.budget[key])) fail(`Invalid budget ${human(key)}.`);
-      }
-      for (const key of ["unmapped_capabilities", "unpriced_checks"]) {
-        if (report.budget[key] !== undefined && !strings(report.budget[key])) fail(`Invalid ${human(key)}.`);
-      }
-      if (report.budget.within_budget !== undefined && report.budget.within_budget !== null
-          && typeof report.budget.within_budget !== "boolean") fail("Invalid budget fit state.");
-      for (const key of ["estimate_basis", "baseline_basis", "status"]) {
-        if (report.budget[key] !== undefined && typeof report.budget[key] !== "string") fail(`Invalid budget ${human(key)}.`);
-      }
-    }
+    if (report.budget !== undefined) validateBudget(report.budget);
     return report;
+  }
+
+  function renderQueue(queue, reports) {
+    const budget = queue.budget;
+    const panel = document.getElementById("queue-summary");
+    const header = el("div", "queue-heading");
+    const heading = append(el("div"), el("p", "eyebrow", "SHARED QUEUE ALLOCATION"), el("h2", "", `${reports.length} ${reports.length === 1 ? "change" : "changes"}. One verification budget.`));
+    const over = budget.within_budget === false;
+    const fit = budget.within_budget === true;
+    append(header, heading, el("span", `tag${fit ? "" : " warning"}`, over ? "Over budget" : fit ? "Within declared budget" : "Budget fit unknown"));
+    panel.append(header);
+    const costs = el("dl", "queue-costs");
+    for (const [label, value] of [["Global limit", budget.limit_minutes], ["Selected known", budget.selected_known_minutes], ["Required known", budget.mandatory_known_minutes], ["Known shortfall", budget.shortfall_minutes]]) {
+      const item = el("div");
+      append(item, el("dt", "eyebrow", label), append(el("dd", "", priced(value) ? amount(value) : "—"), el("span", "", priced(value) ? " min" : " unknown")));
+      costs.append(item);
+    }
+    panel.append(costs);
+    let state = priced(budget.estimated_minutes)
+      ? `The complete selected estimate is ${amount(budget.estimated_minutes)} min across this queue.`
+      : "Selected known costs are a lower bound. The complete queue cost is unknown.";
+    if (over) state += ` Required checks remain selected${priced(budget.shortfall_minutes) ? ` despite a ${priced(budget.estimated_minutes) ? "" : "minimum "}${amount(budget.shortfall_minutes)} min shortfall` : ""}.`;
+    else if (!fit) state += " Do not treat zero known shortfall as evidence that the queue fits.";
+    else if (priced(budget.remaining_minutes)) state += ` ${amount(budget.remaining_minutes)} min of the shared budget remains.`;
+    panel.append(el("p", `queue-state${fit ? "" : " warning"}`, state));
+    for (const [label, values] of [["Unpriced selected checks", budget.unpriced_checks || []], ["Unmapped required capabilities", budget.unmapped_capabilities || []]]) {
+      if (!values.length) continue;
+      const details = el("details", "queue-gaps");
+      details.append(el("summary", "", `${label} (${values.length})`));
+      details.append(append(el("ul"), ...values.map(value => el("li", "", value))));
+      panel.append(details);
+    }
+    if (queue.recommendations?.length) {
+      const notes = el("details", "queue-notes");
+      notes.append(el("summary", "", "Allocation recommendations"));
+      notes.append(append(el("ul"), ...queue.recommendations.map(value => el("li", "", value))));
+      panel.append(notes);
+    }
+    panel.append(el("p", "estimate-note", "Declared estimates, not measured runtimes. This aggregate applies to the reports below; each report shows its share, not an independent budget."));
   }
 
   function sectionHead(index, title, aside) {
@@ -149,7 +195,9 @@
         append(el("div", "bar-row"), el("span", "bar-label", "Full suite"), attr(el("div", "bar-track full"), "aria-hidden", "true"), el("span", "bar-value", `${amount(baseline)} min`)));
       allocation.append(chart);
     }
-    let state = "No budget limit set. Required verification stays in the plan.";
+    let state = budget.scope === "queue_share"
+      ? `This change is part of a shared${priced(budget.queue_limit_minutes) ? ` ${amount(budget.queue_limit_minutes)} min` : ""} queue budget. Overall fit belongs to the queue summary.`
+      : "No budget limit set. Required verification stays in the plan.";
     let warning = false;
     if (budget.status === "not_configured" || !report.checks?.length) {
       state = "Check catalog not configured. Required capabilities are listed below.";
@@ -290,7 +338,7 @@
     const provenance = report.provenance || {};
     const grid = el("dl", "provenance-grid");
     const entries = [
-      ["Repository", `${report.repository} #${report.number}`],
+      ["Change", identity(report)],
       ["Input source", imported ? "Local import · unverified content" : synthetic ? "Synthetic example" : provenance.source || "Analysis report"],
       ["Input completeness", report.input_complete === true ? "Complete by planner input checks" : "Incomplete / uncertain input"],
       ["Head commit", report.head_sha || "Not captured"],
@@ -299,6 +347,9 @@
     ];
     if (provenance.feature_timing) entries.push(["Feature timing", provenance.feature_timing]);
     if (provenance.captured_at) entries.push(["Captured at", provenance.captured_at]);
+    if (imported && (provenance.source || report.source)) entries.push(["Declared source", provenance.source || report.source]);
+    if (report.merge_base_sha) entries.push(["Diff merge base", report.merge_base_sha]);
+    if (report.report_fingerprint) entries.push(["Report fingerprint", report.report_fingerprint]);
     for (const [label, value] of entries) grid.append(append(el("div", "provenance-item"), el("dt", "", label), el("dd", "", value)));
     section.append(grid);
     const limitations = el("details");
@@ -311,12 +362,13 @@
     return section;
   }
 
-  function render(report, {synthetic = false, imported = false} = {}) {
+  function render(report, {synthetic = false, imported = false, queueMember = false} = {}) {
+    document.getElementById("queue-summary").hidden = !queueMember;
     root.replaceChildren();
     const heading = el("header", "report-header");
     const text = el("div", "report-heading");
-    text.append(el("p", "report-ref", `${report.repository} / PR #${report.number}`));
-    text.append(el("h2", "report-title", report.title || report.demo_label || "Pull request verification plan"));
+    text.append(el("p", "report-ref", identity(report)));
+    text.append(el("h2", "report-title", report.title || report.demo_label || (isLocal(report) ? "Local diff verification plan" : "Pull request verification plan")));
     const hasGaps = report.missing_evidence.length > 0 || report.uncertainties.length > 0 || (report.budget?.unmapped_capabilities || []).length > 0;
     append(heading, text, el("span", `tag${hasGaps ? " warning" : ""}`, hasGaps ? "Evidence needs attention" : "Plan ready to inspect"));
     root.append(heading, renderBudget(report));
@@ -336,7 +388,7 @@
       : synthetic
         ? "SYNTHETIC EXAMPLE · This is a worked scenario, not a customer result or a measured saving. Inspect the selected checks and their reasons."
         : "ADVISORY REPORT · Check estimates and source identity before acting. This report does not execute checks or change repository requirements.";
-    document.title = `ReviewBudget — ${report.title || `${report.repository} #${report.number}`}`;
+    document.title = `ReviewBudget — ${queueMember ? "Queue / " : ""}${report.title || identity(report)}`;
   }
 
   let payload;
@@ -344,23 +396,36 @@
     payload = JSON.parse(document.getElementById("report-data").textContent);
     if (!Array.isArray(payload.reports) || !payload.reports.length || payload.reports.length > 30) throw new Error("No supported reports are embedded.");
     payload.reports.forEach(validateReport);
-    if (payload.demo) {
+    if (payload.queue) {
+      if (!object(payload.queue) || payload.queue.schema_version !== 1) throw new Error("Invalid queue allocation.");
+      validateBudget(payload.queue.budget);
+      if (!priced(payload.queue.budget.limit_minutes) || !priced(payload.queue.budget.selected_known_minutes)
+          || !priced(payload.queue.budget.mandatory_known_minutes)) throw new Error("The queue is missing its global budget accounting.");
+      if (payload.queue.recommendations !== undefined && !strings(payload.queue.recommendations)) throw new Error("Invalid queue recommendations.");
+      renderQueue(payload.queue, payload.reports);
+    }
+    if (payload.demo || payload.collection || payload.queue) {
       document.getElementById("scenario-section").hidden = false;
+      document.getElementById("selector-title").textContent = payload.demo ? "EXPLORE A CHANGE" : "INSPECT A CHANGE";
+      document.getElementById("selector-description").textContent = payload.demo
+        ? "Synthetic examples · same deterministic planner"
+        : payload.queue ? "Per-change allocations · one shared queue budget" : "Analysis reports · original source provenance";
       const tabs = document.getElementById("scenario-tabs");
+      attr(tabs, "aria-label", payload.demo ? "Choose a synthetic example" : "Choose a report");
       payload.reports.forEach((report, index) => {
         const button = attr(el("button", "scenario-button"), "type", "button");
         attr(button, "aria-pressed", index === 0);
-        append(button, el("span", "scenario-name", report.demo_label || report.title || `${report.repository} #${report.number}`),
+        append(button, el("span", "scenario-name", report.demo_label || report.title || identity(report)),
           el("span", "scenario-meta", `T${report.tier} · ${priced(report.budget?.estimated_minutes) ? `${amount(report.budget.estimated_minutes)} min selected` : "cost not configured"}`));
         button.addEventListener("click", () => {
           tabs.querySelectorAll("button").forEach(node => attr(node, "aria-pressed", node === button));
-          render(report, {synthetic: true});
+          render(report, {synthetic: Boolean(payload.demo || isSynthetic(report)), queueMember: Boolean(payload.queue)});
           importStatus.textContent = "";
         });
         tabs.append(button);
       });
     }
-    render(payload.reports[0], {synthetic: Boolean(payload.demo || payload.reports[0].provenance?.synthetic)});
+    render(payload.reports[0], {synthetic: Boolean(payload.demo || isSynthetic(payload.reports[0])), queueMember: Boolean(payload.queue)});
   } catch (error) {
     importStatus.textContent = `Cannot display the embedded report: ${error.message}`;
     importStatus.className = "error";

@@ -6,7 +6,7 @@ import json
 import unittest
 
 from reviewbudget.planner import analyze
-from reviewbudget.reports import render_demo, render_html
+from reviewbudget.reports import render_collection, render_demo, render_html, render_queue
 
 
 def report():
@@ -28,6 +28,7 @@ class Document(HTMLParser):
         self.styles = []
         self.csp = None
         self.current = None
+        self.visible = []
         self.feed(text)
 
     def handle_starttag(self, tag, attrs):
@@ -42,6 +43,8 @@ class Document(HTMLParser):
     def handle_data(self, data):
         if self.current is not None:
             self.current[1] += data
+        else:
+            self.visible.append(data)
 
     def handle_endtag(self, tag):
         if tag in {"script", "style"}:
@@ -99,6 +102,61 @@ class ReportTests(unittest.TestCase):
         two["title"] = "Different scenario"
         document = Document(render_demo([one, two]))
         self.assertEqual(json.loads(document.scripts[0][1]), {"demo": True, "reports": [one, two]})
+
+    def test_real_collection_preserves_provenance_without_demo_mode(self):
+        source = report()
+        source["provenance"] = {"source": "github", "synthetic": False}
+        document = Document(render_collection([source]))
+        payload = json.loads(document.scripts[0][1])
+        self.assertFalse(payload["demo"])
+        self.assertTrue(payload["collection"])
+        self.assertNotIn("queue", payload)
+        self.assertEqual(payload["reports"], [source])
+        self.assertNotIn("Synthetic examples", "".join(document.visible))
+
+    def test_queue_preserves_global_accounting_separate_from_report_shares(self):
+        source = report()
+        source["budget"] = {"scope": "queue_share", "limit_minutes": None,
+                            "queue_limit_minutes": 20, "estimated_minutes": None}
+        queue = {"schema_version": 1, "mode": "advisory", "reports": [source],
+                 "budget": {"limit_minutes": 20, "selected_known_minutes": 35,
+                            "mandatory_known_minutes": 35, "shortfall_minutes": 15,
+                            "estimated_minutes": None, "within_budget": False,
+                            "unpriced_checks": ["example/parser#42/security"],
+                            "unmapped_capabilities": ["example/parser#42/human_review"]},
+                 "recommendations": ["Keep required checks selected."]}
+        original = copy.deepcopy(queue)
+        document = Document(render_queue(queue))
+        payload = json.loads(document.scripts[0][1])
+        self.assertEqual(queue, original)
+        self.assertFalse(payload["demo"])
+        self.assertTrue(payload["collection"])
+        self.assertEqual(payload["reports"], queue["reports"])
+        self.assertEqual(payload["queue"], {key: value for key, value in queue.items() if key != "reports"})
+        self.assertEqual(payload["queue"]["budget"]["limit_minutes"], 20)
+        self.assertIsNone(payload["reports"][0]["budget"]["limit_minutes"])
+
+    def test_local_diff_fallback_never_claims_placeholder_pull_request(self):
+        for nested in [False, True]:
+            source = report()
+            source["number"] = 1
+            source.pop("title", None)
+            source["source"] = "local_git"
+            if nested:
+                source["provenance"] = {"source": "local_git", "synthetic": False}
+            document = Document(render_html(source))
+            visible = "".join(document.visible)
+            self.assertIn("local diff", visible)
+            self.assertIn("base bbbbbbbb / head aaaaaaaa", visible)
+            self.assertNotIn("PR #1", visible)
+            self.assertNotIn("example/parser #1", visible)
+
+    def test_invalid_queue_shapes_fail_before_rendering(self):
+        for source in [None, {}, {"schema_version": 2, "budget": {}},
+                       {"schema_version": 1, "budget": [], "reports": [report()]},
+                       {"schema_version": 1, "budget": {}, "reports": []}]:
+            with self.subTest(source=source), self.assertRaises(ValueError):
+                render_queue(source)
 
     def test_nonfinite_numbers_and_invalid_report_roots_are_rejected(self):
         for source in [{}, {"schema_version": 2}, {**report(), "tier": True}, {**report(), "tier": 8}]:

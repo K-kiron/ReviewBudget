@@ -7,6 +7,12 @@ remote assets, or network connection. The Python interfaces are
 `reviewbudget.reports.render_demo(reports)`; both return the complete document as
 a string. Pass analysis output, rather than raw pull request snapshots.
 
+Use `render_collection(reports)` for a list of actual analysis reports and
+`render_queue(allocation)` for the complete output of `reviewbudget allocate`.
+These views preserve each report's original provenance; they do not label real
+changes as synthetic examples. Local Git analyses identify a local diff and its
+commits instead of displaying the schema's placeholder pull request number.
+
 The viewer displays the planner's check decisions. It does not contain a second
 risk engine, change verification tiers, execute checks, or recalculate an
 allocation. The demo chooser compares planner-produced examples and explicitly
@@ -33,6 +39,19 @@ Expand a check for its decision reasons, covered capabilities, and matched paths
 Use the check filters to inspect selected, deferred, or inapplicable work. The
 source section preserves commit identities, policy fingerprint, provenance,
 input completeness, and the planner's limitations.
+
+## Shared queue budgets
+
+Queue HTML retains the allocator's aggregate budget above the report selector:
+global limit, selected known cost, required known cost, known shortfall, unpriced
+selected checks, and unmapped required capabilities. Incomplete totals remain
+unknown, while an already-known overrun remains visible as a lower bound.
+
+Each selected report shows its share of that allocation. It does not have an
+independent budget: overall fit comes from the aggregate queue summary. Importing
+a separate analysis report hides the original queue summary so the imported
+change cannot be mistaken for a queue member. Selecting a queue report restores
+the original summary.
 
 ## Opening a local report
 
