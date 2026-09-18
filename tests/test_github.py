@@ -63,6 +63,22 @@ class ParsePullRequestTests(unittest.TestCase):
 
 
 class FetchPullRequestTests(unittest.TestCase):
+    def test_canonical_repository_id_pagination_keeps_original_request_scope(self):
+        client = GitHubClient(token="")
+        canonical = "https://api.github.com/repositories/212613049/pulls/12/files?per_page=100&page=2"
+        client._transport = ScriptedTransport([
+            pr_data(changed_files=2), page_response([file_data("a.py")], canonical),
+            [file_data("b.py")], pr_data(changed_files=2),
+        ])
+        self.assertTrue(client.fetch_pr("octocat/Hello-World", 12)["files_complete"])
+        self.assertEqual(client._transport.requests[2].full_url,
+                         "https://api.github.com/repos/octocat/Hello-World/pulls/12/files?per_page=100&page=2")
+        for unsafe in (canonical.replace("/12/", "/13/"), canonical.replace("/files?", "/reviews?"),
+                       canonical.replace("api.github.com", "evil.example"), canonical.replace("page=2", "page=3")):
+            client._transport = ScriptedTransport([pr_data(changed_files=2), page_response([file_data()], unsafe)])
+            with self.assertRaises(GitHubError):
+                client.fetch_pr("octocat/Hello-World", 12)
+
     def test_missing_body_and_null_or_omitted_patch_remain_unknown(self):
         details = {key: value for key, value in pr_data().items() if key != "body"}
         for include_patch in (True, False):
@@ -336,6 +352,30 @@ class TransportSafetyTests(unittest.TestCase):
             with self.assertRaises(GitHubError) as error:
                 client.fetch_pr("octocat/Hello-World", 12)
             self.assertNotIn("server-sensitive", str(error.exception))
+
+
+class ProspectiveCaptureTests(unittest.TestCase):
+    def test_open_unreviewed_pr_can_be_preserved_before_review(self):
+        pr = {**pr_data(), "state": "open", "closed_at": None}
+        client = GitHubClient(token="")
+        client._transport = ScriptedTransport([pr, [file_data()], pr, [], pr])
+        result = client.capture_pr("octocat/Hello-World", 12)
+        self.assertEqual(result["feature_timing"], "pre_review")
+        self.assertEqual(result["provenance"]["submitted_reviews_at_capture"], 0)
+
+    def test_reviewed_or_closed_pr_is_not_relabelled_pre_review(self):
+        for state, reviews in [("closed", []), ("open", [{"id": 1, "state": "COMMENTED", "submitted_at": "2026-08-01T11:00:00Z"}])]:
+            pr = {**pr_data(), "state": state}
+            client = GitHubClient(token="")
+            client._transport = ScriptedTransport([pr, [file_data()], pr, reviews, pr])
+            self.assertEqual(client.capture_pr("octocat/Hello-World", 12)["feature_timing"], "final_state")
+
+    def test_capture_rejects_metadata_changes_after_review_check(self):
+        pr = {**pr_data(), "state": "open"}
+        client = GitHubClient(token="")
+        client._transport = ScriptedTransport([pr, [file_data()], pr, [], {**pr, "title": "Changed"}])
+        with self.assertRaises(GitHubError):
+            client.capture_pr("octocat/Hello-World", 12)
 
 
 if __name__ == "__main__":

@@ -11,7 +11,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        os: [ubuntu-latest, windows-latest, macos-latest]
         python: ['3.11', '3.13']
     runs-on: ${{ matrix.os }}
     steps:
@@ -36,6 +36,17 @@ jobs:
           reviewbudget analyze --input examples/documentation.json --format json
           reviewbudget analyze --input examples/auth-change.json --format markdown
           reviewbudget evaluate --input examples/history.jsonl
+          reviewbudget demo --scenario auth --format json --output auth-report.json
+          reviewbudget allocate --input auth-report.json --budget-minutes 30
+          python scripts/build_preview.py preview
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: matrix.os == 'ubuntu-latest' && matrix.python == '3.11'
+        with:
+          name: public-preview
+          path: |
+            dist/
+            preview/
+          if-no-files-found: error
   action:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
@@ -48,12 +59,22 @@ jobs:
           persist-credentials: false
       - uses: ./
         id: budget
+        with:
+          policy: examples/budget-policy.toml
+          artifact-directory: ${{ runner.temp }}/reviewbudget
       - name: Verify advisory outputs
         shell: bash
         env:
           TIER: ${{ steps.budget.outputs.tier }}
           SKIP_REQUIRED: ${{ steps.budget.outputs.allow-skip-required-checks }}
+          SELECTED: ${{ steps.budget.outputs.selected-checks }}
         run: |
           test "$TIER" -ge 0
           test "$TIER" -le 3
           test "$SKIP_REQUIRED" = "false"
+          python -c 'import json, os; assert "lint" in json.loads(os.environ["SELECTED"])'
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: pull-request-verification
+          path: ${{ runner.temp }}/reviewbudget/
+          if-no-files-found: error

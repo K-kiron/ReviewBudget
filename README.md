@@ -1,159 +1,136 @@
 # ReviewBudget
 
-Allocate verification effort across pull requests.
+**Give every pull request a verification plan that fits your review budget.**
 
-ReviewBudget turns changed files and contribution evidence into an explainable verification plan. Use it to identify changes that need integration tests, security review, or missing supporting evidence before spending more review time.
+[![CI](https://github.com/K-kiron/ReviewBudget/actions/workflows/ci.yml/badge.svg?branch=dev)](https://github.com/K-kiron/ReviewBudget/actions/workflows/ci.yml)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-276b58)](pyproject.toml)
+[![MIT](https://img.shields.io/badge/license-MIT-276b58)](LICENSE)
 
-The first release is **advisory**. It does not execute contribution code, approve changes, modify branch protection, invoke review services, or skip existing required checks. Scores are transparent heuristics awaiting validation against historical data.
+![ReviewBudget: spend review effort where it matters](docs/assets/banner.svg)
 
-```text
-ReviewBudget
+Some changes need a quick check. Others need integration tests, a security review, and a rollback plan. ReviewBudget turns a Git diff or GitHub PR into **named checks, explicit costs, missing evidence, and reasons**. It also allocates one budget across a queue of PRs.
 
-example/service #42
-Verification: Tier 3 — intensive
-Structural risk: high
-Evidence debt: high
+Runs locally. No account, service, or runtime dependencies. Produces a portable HTML report you can open offline. Existing required checks stay required, even when the budget is too small.
 
-Recommended checks:
-- format and lint
-- unit tests
-- comprehensive review
-- integration tests
-- e2e tests
-- security review
-- human review
-```
+## Try it in a minute
 
-## Try it locally
-
-Python 3.11 or later is required. There are no runtime package dependencies.
+Requires Python 3.11+ and Git. Install the development preview into an isolated environment:
 
 ```bash
-git clone https://github.com/K-kiron/ReviewBudget.git
-cd ReviewBudget
-git switch dev
-# Before the initial release is merged, check out its pull request branch.
 python -m venv .venv
+# Linux/macOS: source .venv/bin/activate
+# Windows PowerShell: .venv\Scripts\Activate.ps1
+python -m pip install "git+https://github.com/K-kiron/ReviewBudget.git@dev"
+reviewbudget demo --format html --output demo.html
 ```
 
-Activate the environment (`.venv\Scripts\Activate.ps1` on Windows or `source .venv/bin/activate` on Linux/macOS), then:
+Open `demo.html` in your browser. Switch between documentation, tested code, authorization, migration, and incomplete-input examples. Expand a check to see why it was selected. Everything works offline, including importing your own JSON report.
+
+**Before this preview is merged into `dev`, install its PR branch:** replace `@dev` with `@feat/8-public-preview`. There is no package-registry release yet. Installation from a release wheel is documented in [releases](docs/releases.md).
+
+Prefer a terminal? Run `reviewbudget demo`. Examples and policies are included in the installed package; you do not need a repository checkout or token.
+
+## Use it on your change
+
+From your own Git repository:
 
 ```bash
-python -m pip install .
-reviewbudget analyze --input examples/documentation.json
-reviewbudget analyze --input examples/auth-change.json --format markdown
-reviewbudget analyze --input examples/auth-change.json --format json --output reviewbudget-report.json
+reviewbudget init --preset python  # or --preset node
+# Edit .reviewbudget.toml to name your real checks and supply their costs.
+reviewbudget analyze --base main --policy .reviewbudget.toml
+reviewbudget analyze --base main --policy .reviewbudget.toml --format html --output review.html
 ```
 
-The examples are synthetic. They demonstrate behavior, not measured effectiveness. The package is not yet published to a package registry.
+Local analysis compares **committed changes since the merge base**. Uncommitted edits are excluded. It does not execute your code, hooks, diff helpers, or test commands. `init` never overwrites an existing policy.
 
-Analyze a live pull request:
+Analyze a GitHub PR using an existing GitHub CLI login:
 
 ```bash
-reviewbudget analyze https://github.com/OWNER/REPO/pull/123
-# Equivalent shorthand:
-reviewbudget OWNER/REPO#123
+reviewbudget analyze OWNER/REPO#123 --auth gh --policy .reviewbudget.toml
 ```
 
-Set `GITHUB_TOKEN` or `GH_TOKEN` for private repositories or higher API limits. Only repository pull-request read access is needed. Public requests work without a token, subject to GitHub's unauthenticated rate limit. Tokens are never command-line arguments or report fields.
+Or use `GITHUB_TOKEN` / `GH_TOKEN` with the default authentication mode. Public PRs also work without authentication, within GitHub's API limits. Tokens are never report fields or command arguments.
 
-## What the plan means
+Save multiple reports and allocate a shared budget:
 
-| Tier | Recommended verification |
+```bash
+reviewbudget analyze OWNER/REPO#123 --auth gh --policy .reviewbudget.toml --format json --output first.json
+reviewbudget analyze OWNER/REPO#124 --auth gh --policy .reviewbudget.toml --format json --output second.json
+reviewbudget allocate --input first.json --input second.json --budget-minutes 60 --format html --output queue.html
+```
+
+## What you get
+
+| Output | What it tells you |
 | --- | --- |
-| 0 · deterministic | Format and lint checks for complete, low-risk documentation changes |
-| 1 · light | Deterministic checks, unit tests, and light review |
-| 2 · comprehensive | Deterministic checks, unit tests, comprehensive review, and integration tests |
-| 3 · intensive | Tier 2 plus end-to-end tests, security review, and human review |
+| Verification floor | The minimum recommended capabilities for this change, from lint to intensive review |
+| Named checks | Your configured jobs or review activities, selected, deferred, or not applicable |
+| Budget accounting | Declared check minutes, mandatory shortfall, unknown prices, and unmapped capabilities |
+| Evidence gaps | Missing testing, reproduction, compatibility, migration, or rollout information |
+| Reasons and provenance | Relevant paths, source commits, policy fingerprint, and input limitations |
 
-Three separate outputs explain the recommendation:
+A tiny authorization change still needs intensive review. A missing patch is uncertainty, not a free pass. If required work costs 107 declared minutes and the budget is 45, the report shows the **62-minute shortfall** and keeps that work selected.
 
-- **Structural risk** reflects change size and paths associated with security, workflows, dependencies, public interfaces, schema changes, or configuration.
-- **Evidence debt** lists missing scope, verification, test changes, reproduction, dependency rationale, migration, and rollout evidence when relevant.
-- **Review burden score** combines those signals for ranking. It is not a defect probability, review-time estimate, or currency amount.
+The bundled policy gives the documentation example 2 selected minutes versus a 115-minute full configured suite. Those numbers are **illustrative configuration**, not observed savings. The full baseline includes all configured checks, including checks that would not apply to the changed paths. Check minutes add together; they are not elapsed time or reviewer availability.
 
-Security and workflow changes always receive Tier 3. Dependency, interface, migration, and configuration changes receive at least Tier 2. Incomplete file lists, missing patches, missing commit identities, and empty diffs receive at least Tier 2. Renames retain the sensitivity of both paths. Removing or shrinking tests also sets a Tier 2 floor.
-
-Descriptions are self-reported evidence. A changed test file does not prove coverage or a successful run. Path matching identifies potential interface changes; it does not parse language semantics. English Markdown headings such as `Summary`, `Testing`, `Reproduction`, `Migration`, and `Rollout` are currently recognized. Comments, unchecked checkboxes, and common placeholders do not count. Non-English or unusual descriptions may need manual assessment.
-
-The initial structural score starts at 10 for non-documentation changes, adds a logarithmic size contribution capped at 30, then adds category weights: security/workflow 55 each, migration 35, public interface/dependencies 25 each, configuration 20. Test reduction adds 15 and incomplete input adds 35. Scores cap at 100. Each missing evidence item contributes 15 debt points; 40% of debt is added to the structural score for ranking. Complete documentation changes start at zero. These are provisional policy choices, not learned estimates.
-
-## Repository policy
-
-Policy is loaded only when explicitly specified:
-
-```bash
-reviewbudget analyze --input examples/auth-change.json --policy examples/policy.toml
-```
+## Map the plan to your checks
 
 ```toml
-thresholds = [20, 45, 70]
-sensitive_paths = ["src/payments/*", "lib/permissions.py"]
+sensitive_paths = ["src/payments/*"]
+
+[budget]
+limit_minutes = 30
+
+[[checks]]
+id = "lint"
+name = "Formatting and lint"
+covers = ["format_and_lint"]
+required = true
+estimated_minutes = 2
+
+[[checks]]
+id = "unit"
+name = "Unit tests"
+covers = ["unit_tests"]
+paths = ["src/*", "tests/*"]
+estimated_minutes = 5
+priority = 20
 ```
 
-Patterns use case-insensitive Python `fnmatch` against the whole POSIX path; `*` can match `/`. Custom paths add sensitivity. Thresholds change score routing, but cannot remove the built-in safety floors. Unknown policy keys fail validation. The JSON report records a normalized policy hash alongside the analyzed base and head commits.
+This abbreviated policy does not map every capability; the report will say so. Start with `init` for a complete Python or Node template. Replace illustrative costs with your own estimates, or omit prices when unknown. A mapping declares intent; it does not establish that a job really covers a behavior or has passed.
 
-## GitHub Action
+[Policy reference](docs/policy.md) · [GitHub Actions recipe](docs/github-actions.md) · [Report format](docs/report-format.md) · [CLI and troubleshooting](docs/usage.md)
 
-Pin the Action to a reviewed full commit SHA. Replace `REVIEWED_COMMIT_SHA` below after selecting the version to use. No repository checkout is needed with the default policy.
+## Where it fits
 
-```yaml
-name: Verification plan
-on:
-  pull_request:
-permissions:
-  contents: read
-  pull-requests: read
-jobs:
-  plan:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: K-kiron/ReviewBudget@REVIEWED_COMMIT_SHA
-        id: budget
-        with:
-          token: ${{ github.token }}
-```
+| Approach | Useful for | ReviewBudget adds |
+| --- | --- | --- |
+| Always run every check | A simple, conservative default | A visible plan for optional spending and manual review priorities |
+| [paths-filter](https://github.com/dorny/paths-filter) | Matching changed paths to jobs | Verification floors, evidence gaps, priced checks, and a shared PR budget |
+| [reviewdog](https://github.com/reviewdog/reviewdog) | Presenting analyzer diagnostics in code review | Planning which verification activities need attention before executing them |
 
-The Action writes a job summary and scalar outputs: `tier`, `full-ci-required`, `human-review-required`, `security-review-required`, `input-complete`, `review-cost-score`, and `allow-skip-required-checks` (always `false`). Boolean outputs are the strings `true` and `false`. The Action supplies Python 3.11 and imports its package in isolated mode from its own trusted directory.
+ReviewBudget does not replace analyzers, test runners, reviewers, or branch protection. It plans work; it does not execute checks or approve merges.
 
-Keep existing CI enabled while evaluating recommendations. If input retrieval or validation fails, the step fails and emits conservative Tier 3 outputs. A stale event also fails; rerun on the current PR commits. An incomplete but valid snapshot still produces a conservative report.
+## Evidence and limits
 
-For an explicit `policy` input, provide a trusted TOML file. If using `pull_request_target`, keep the workflow and any checkout on a trusted base revision. Never check out or execute the contribution's head in a privileged job. The [GitHub secure-use reference](https://docs.github.com/en/actions/reference/security/secure-use) explains that trust boundary.
+Version 0.2 is a usable **advisory public preview**. Routing is deterministic and explainable, not a trained defect predictor. Description evidence is self-reported; path matching does not understand program semantics. English Markdown evidence headings are currently supported.
 
-## Test the hypothesis
+[The reproducible evaluation](docs/evaluation.md) reports results on public PRs, the change-size baseline, sample selection, and eligibility limits. Final-state history cannot prove pre-review prediction quality. No claim of measured time savings, defect reduction, or superiority over the baseline is made.
 
-Collect closed pull requests into a local JSONL file:
+To build prospective evidence, save an original snapshot before review, then join it with eventual outcomes. The collector supports checkpointed resume without changing the chosen PR cohort:
 
 ```bash
-reviewbudget collect OWNER/REPO --limit 100 --output history.local.jsonl
-reviewbudget evaluate --input history.local.jsonl --output reviewbudget-report.json
-# Run the evaluator offline with explicitly synthetic data:
-reviewbudget evaluate --input examples/history.jsonl
+reviewbudget capture OWNER/REPO#123 --auth gh --output snapshots/pr-123.json
+reviewbudget collect OWNER/REPO --auth gh --limit 100 --output history.local.jsonl
+# After an interrupted collection:
+reviewbudget collect OWNER/REPO --auth gh --limit 100 --output history.local.jsonl --resume
+reviewbudget evaluate --input history.local.jsonl --snapshots snapshots --output evaluation.json
 ```
 
-Collection uses read-only metadata, files, and review endpoints. It captures current **final-state** data from recently updated closed PRs, never an invented opening-time snapshot. Files and reviews are paginated; the [GitHub files endpoint](https://docs.github.com/en/rest/pulls/pulls#list-pull-requests-files) has a 3,000-file cap, which is preserved as incomplete input. Each PR needs multiple API requests; the collector stops on API errors instead of writing a partial dataset. Keep collected private repository data local.
+A capture is marked pre-review only while the PR is open and no submitted reviews are observed. The evaluator checks observation and outcome times again. Preserve original snapshots; do not replace them with final-state captures.
 
-Evaluation uses `review_count + 2 × changes_requested + review_comments` as an observed activity proxy, with labels above the training 80th percentile. Submitted review events are not unique reviewers or proven review rounds. All repositories share a chronological creation-time split; training outcomes that end after the holdout boundary are excluded. Label and diagnostic ranking thresholds come only from training data.
+## Contribute
 
-The report compares the planner against `changed lines + changed files`, including expected precision at the top 20% with fractional tie handling, actual Tier 2/3 recall, and actual Tier 0/1 share. The research targets are:
+See [CONTRIBUTING.md](CONTRIBUTING.md) for development, tests, and useful bug reports. [SECURITY.md](SECURITY.md) describes trust boundaries. [CHANGELOG.md](CHANGELOG.md) lists changes. [Release instructions](docs/releases.md) cover verified artifacts and the offline demo.
 
-- At least 85% recall of high-burden PRs in deeper verification tiers.
-- At least 30% of PRs assigned to Tier 0/1.
-- At least 15% relative precision lift over the change-size baseline.
-
-These are project investment thresholds. They are not industry benchmarks. Synthetic, final-state, temporally unverified, incomplete, small, or malformed datasets remain exploratory. Eligibility requires at least 300 evaluated records across three repositories represented in both partitions, enough positive and negative examples, and consistent non-synthetic snapshots captured before review. See [the data format](docs/data-format.md) for provenance fields. Even an eligible passing result does not establish significance, defect prevention, or financial savings.
-
-Repository-specific learned routing, semantic claim-to-diff verification, prospective evaluation, and cost simulation are not implemented in this initial release. Repository policy is configurable; routing has not been calibrated from historical outcomes. The next decision is whether verified pre-review data supports the hypothesis beyond the size baseline.
-
-## Development
-
-```bash
-python -m pip install -e .
-python -m unittest discover -s tests -v
-python -m pip install build
-python -m build
-```
-
-CI builds and installs the wheel, runs behavior tests, and checks the offline examples on Windows and Linux with Python 3.11 and 3.13. Runtime code uses only the standard library. See [SECURITY.md](SECURITY.md) for the input and execution boundaries.
-
-MIT licensed.
+MIT licensed. Built and maintained by [Wenhao XU](https://github.com/K-kiron).

@@ -23,17 +23,19 @@ _STATUSES = {"A": "added", "D": "removed", "M": "modified", "R": "renamed",
 def _git_executable(repo: Path) -> str:
     # Windows executable lookup normally prefers the current directory. Search
     # only absolute PATH entries, excluding the repository and its ancestors.
+    checkout = next((path for path in (repo, *repo.parents) if (path / ".git").exists()), repo)
     for entry in os.environ.get("PATH", os.defpath).split(os.pathsep):
         directory = Path(entry.strip('"'))
         if not entry or not directory.is_absolute():
             continue
         directory = directory.resolve()
-        if directory == repo or repo in directory.parents or directory in repo.parents:
+        if (directory == repo or repo in directory.parents or directory in repo.parents
+                or directory == checkout or checkout in directory.parents):
             continue
         candidate = directory / ("git.exe" if os.name == "nt" else "git")
         if candidate.is_file() and os.access(candidate, os.X_OK):
             candidate = candidate.resolve()
-            if repo not in candidate.parents:
+            if repo not in candidate.parents and checkout not in candidate.parents:
                 return str(candidate)
     raise ValueError("Git must be installed on an absolute PATH outside the repository.")
 

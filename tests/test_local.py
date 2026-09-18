@@ -196,6 +196,16 @@ class LocalCaptureTests(unittest.TestCase):
             os.chdir(current)
         self.assertEqual(result["changed_files"], 2)
 
+    def test_subdirectory_capture_rejects_sibling_checkout_executables(self):
+        shadow_name = "git.exe" if os.name == "nt" else "git"
+        self.write("bin/" + shadow_name, b"untrusted executable\n")
+        (self.repo / "bin" / shadow_name).chmod(0o755)
+        self.write("src/module.py", "value = 1\n")
+        self.commit("Nested capture fixture")
+        with patch.dict(os.environ, {"PATH": str(self.repo / "bin") + os.pathsep + os.environ["PATH"]}):
+            result = capture_local(self.repo / "src", self.base)
+        self.assertEqual(result["changed_files"], 2)
+
 
 if __name__ == "__main__":
     unittest.main()
