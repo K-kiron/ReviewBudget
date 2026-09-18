@@ -432,26 +432,29 @@
     root.append(el("p", "empty", "The embedded report is invalid. Open a valid local analysis report to continue."));
   }
 
-  async function importFile(file) {
-    if (!file) return;
+  async function importReport(source) {
+    const pasted = typeof source === "string";
+    if (!pasted && !source) return;
     importStatus.className = "";
     try {
-      if (file.size > maxImportBytes) throw new Error("The file exceeds the 2 MiB limit.");
-      const text = await file.text();
+      if (!pasted && source.size > maxImportBytes) throw new Error("The report exceeds the 2 MiB limit.");
+      const text = pasted ? source : await source.text();
+      if (new TextEncoder().encode(text).byteLength > maxImportBytes) throw new Error("The report exceeds the 2 MiB limit.");
       let report;
       try { report = JSON.parse(text.replace(/^\uFEFF/, "")); }
-      catch { throw new Error("The file is not valid JSON."); }
+      catch { throw new Error("The report is not valid JSON."); }
       validateReport(report);
       render(report, {imported: true});
       document.querySelectorAll(".scenario-button").forEach(button => attr(button, "aria-pressed", "false"));
-      importStatus.textContent = `Opened ${file.name}. Read locally; no upload.`;
+      importStatus.textContent = `Opened ${pasted ? "pasted JSON" : source.name}. Read locally; no upload.`;
       root.focus({preventScroll: true});
     } catch (error) {
       importStatus.className = "error";
       importStatus.textContent = `Could not open report: ${error.message} The current report is unchanged.`;
     } finally { input.value = ""; }
   }
-  input.addEventListener("change", () => importFile(input.files[0]));
+  input.addEventListener("change", () => importReport(input.files[0]));
+  document.getElementById("view-pasted-report").addEventListener("click", () => importReport(document.getElementById("report-json").value));
   for (const eventName of ["dragenter", "dragover"]) dropZone.addEventListener(eventName, event => {
     event.preventDefault(); dropZone.classList.add("dragging");
   });
@@ -463,6 +466,6 @@
       importStatus.textContent = "Drop one ReviewBudget analysis report at a time.";
       return;
     }
-    importFile(event.dataTransfer.files[0]);
+    importReport(event.dataTransfer.files[0]);
   });
 })();

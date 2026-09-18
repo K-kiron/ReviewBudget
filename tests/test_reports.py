@@ -177,9 +177,21 @@ class ReportTests(unittest.TestCase):
         # invariant explicit alongside parser-boundary tests and browser verification.
         for operation in ["innerHTML", "outerHTML", "insertAdjacentHTML", "document.write", "eval(", "fetch(", "XMLHttpRequest", "localStorage", "sessionStorage"]:
             self.assertNotIn(operation, script)
-        self.assertIn("file.size > maxImportBytes", script)
+        self.assertIn("source.size > maxImportBytes", script)
+        self.assertIn("new TextEncoder().encode(text).byteLength > maxImportBytes", script)
         self.assertIn("validateReport(report)", script)
         self.assertIn("textContent", script)
+
+    def test_paste_import_has_accessible_input_and_explicit_action(self):
+        document = Document(render_html(report()))
+        controls = {attrs["id"]: (tag, attrs) for tag, attrs in document.tags if "id" in attrs}
+        self.assertEqual(controls["paste-report"][0], "details")
+        self.assertEqual(controls["report-json"][0], "textarea")
+        self.assertIn("import-status", controls["report-json"][1]["aria-describedby"])
+        self.assertTrue(any(tag == "label" and attrs.get("for") == "report-json" for tag, attrs in document.tags))
+        self.assertEqual(controls["view-pasted-report"][1]["type"], "button")
+        self.assertEqual(controls["import-status"][1]["aria-live"], "polite")
+        self.assertEqual(controls["report-file"][1]["type"], "file")
 
 
 if __name__ == "__main__":
