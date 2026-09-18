@@ -9,7 +9,9 @@ import math
 import re
 from pathlib import PurePosixPath
 
-DEFAULT_POLICY = {"thresholds": [20, 45, 70], "sensitive_paths": []}
+from .budget import fingerprint, plan_checks, recommendations
+from .policy import DEFAULT_POLICY, validate_policy
+
 TIERS = ("deterministic", "light", "comprehensive", "intensive")
 DEPENDENCIES = {
     "package.json", "package-lock.json", "npm-shrinkwrap.json", "yarn.lock",
@@ -18,26 +20,6 @@ DEPENDENCIES = {
     "gemfile.lock", "composer.json", "composer.lock", "pom.xml", "build.gradle",
     "build.gradle.kts", "packages.lock.json", "directory.packages.props",
 }
-
-
-def validate_policy(policy: dict | None = None) -> dict:
-    if policy is None:
-        policy = {}
-    if not isinstance(policy, dict) or set(policy) - set(DEFAULT_POLICY):
-        raise ValueError("Policy accepts only thresholds and sensitive_paths.")
-    result = {**DEFAULT_POLICY, **policy}
-    thresholds = result["thresholds"]
-    if (not isinstance(thresholds, list) or len(thresholds) != 3
-            or any(type(v) is not int or not 1 <= v <= 100 for v in thresholds)
-            or not thresholds[0] < thresholds[1] < thresholds[2]):
-        raise ValueError("thresholds must be three strictly increasing integers in 1..100.")
-    patterns = result["sensitive_paths"]
-    if (not isinstance(patterns, list) or len(patterns) > 100
-            or any(not isinstance(p, str) or not p or len(p) > 512
-                   or "\\" in p or p.startswith("/") or ".." in p.split("/")
-                   or any(ord(c) < 32 for c in p) for p in patterns)):
-        raise ValueError("sensitive_paths must be a list of relative POSIX glob patterns.")
-    return {"thresholds": list(thresholds), "sensitive_paths": sorted(set(patterns))}
 
 
 def _path(value: object) -> str:
@@ -63,6 +45,11 @@ def validate_snapshot(snapshot: dict) -> None:
             raise ValueError(f"Snapshot {key} must be text or null.")
         if len(snapshot.get(key) or "") > 1_000_000:
             raise ValueError(f"Snapshot {key} exceeds the input limit.")
+    for key in ("source", "feature_timing", "captured_at"):
+        if snapshot.get(key) is not None and (not isinstance(snapshot[key], str) or len(snapshot[key]) > 2000):
+            raise ValueError(f"Snapshot {key} must be text of at most 2000 characters or null.")
+    if snapshot.get("synthetic") is not None and type(snapshot["synthetic"]) is not bool:
+        raise ValueError("Snapshot synthetic must be a boolean or null.")
     for key in ("head_sha", "base_sha"):
         if snapshot.get(key) is not None and not re.fullmatch(r"[0-9a-fA-F]{40,64}", str(snapshot[key])):
             raise ValueError(f"Snapshot {key} must be a commit SHA.")
@@ -259,9 +246,22 @@ def analyze(snapshot: dict, policy: dict | None = None) -> dict:
     drivers.append({"signal": "change_size", "message": f"{loc} changed lines across {len(files)} observed files.", "paths": []})
     if docs_only:
         drivers.append({"signal": "documentation_only", "message": "All observed paths are documentation with no sensitive path match.", "paths": []})
-    return {
+    checks, budget = plan_checks(files, required, not uncertainties, policy)
+    provenance = {key: snapshot.get(key) for key in ("source", "synthetic", "feature_timing", "captured_at")}
+    report = {
         "schema_version": 1,
         "repository": snapshot["repository"], "number": snapshot["number"],
+        "title": snapshot.get("title") or "",
+        **provenance, "provenance": provenance,
+        "stats": {"files": len(files), "lines": loc,
+                  "additions": sum(f["additions"] for f in files),
+                  "deletions": sum(f["deletions"] for f in files)},
+        "files": [{
+            "filename": f["filename"], "previous_filename": f.get("previous_filename"),
+            "status": f["status"], "additions": f["additions"], "deletions": f["deletions"],
+            "classification": "test" if _is_test(f["filename"]) else "documentation" if _is_doc(f["filename"]) else "source",
+            "signals": sorted(_categories(f["filename"], policy) | (_categories(f["previous_filename"], policy) if f.get("previous_filename") else set())),
+        } for f in sorted(files, key=lambda f: f["filename"])],
         "head_sha": snapshot.get("head_sha"), "base_sha": snapshot.get("base_sha"),
         "policy_hash": hashlib.sha256(json.dumps(policy, sort_keys=True).encode()).hexdigest(),
         "mode": "advisory", "tier": tier, "tier_name": TIERS[tier],
@@ -274,6 +274,8 @@ def analyze(snapshot: dict, policy: dict | None = None) -> dict:
         "full_ci_required": tier >= 2,
         "human_review_required": tier == 3, "security_review_required": tier == 3,
         "allow_skip_required_checks": False,
+        "checks": checks, "budget": budget,
+        "recommendations": recommendations(budget),
         "plan": {"required": required, "optional": ["human_review"] if tier < 3 else [],
                  "next_steps": [f"Provide {name.replace('_', ' ')} evidence." for name in missing]},
         "limitations": [
@@ -281,8 +283,11 @@ def analyze(snapshot: dict, policy: dict | None = None) -> dict:
             "Description evidence is self-reported; changed tests do not establish coverage or passing results.",
             "Path matching identifies potential surfaces, not semantic API changes or vulnerabilities.",
             "Recommendations never override branch protection or authorize skipping required checks.",
+            "Check costs are declared configuration estimates, not measured durations, observed savings or wall-clock predictions.",
         ],
     }
+    report["report_fingerprint"] = fingerprint(report)
+    return report
 
 
 def _level(score: int) -> str:
