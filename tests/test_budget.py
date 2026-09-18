@@ -2,7 +2,7 @@ import copy
 import math
 import unittest
 
-from reviewbudget.budget import allocate
+from reviewbudget.budget import allocate, fingerprint
 from reviewbudget.planner import analyze
 from test_planner import file, snapshot
 
@@ -13,6 +13,84 @@ def check(check_id, covers, cost, **options):
 
 
 class QueueBudgetTests(unittest.TestCase):
+    def test_missing_required_flag_and_non_json_reports_fail_with_value_error(self):
+        report = analyze(snapshot([file("README.md")]), {"checks": [check("lint", ["format_and_lint"], 4)]})
+        del report["checks"][0]["required"]
+        report["report_fingerprint"] = fingerprint(report)
+        with self.assertRaises(ValueError):
+            allocate([report], 10)
+        report = analyze(snapshot([file("README.md")]))
+        report["extra"] = {"not-json"}
+        with self.assertRaises(ValueError):
+            allocate([report], 10)
+        report["extra"] = math.nan
+        with self.assertRaises(ValueError):
+            allocate([report], 10)
+
+    def test_malformed_saved_fields_fail_cleanly_even_with_recomputed_hash(self):
+        original = analyze(snapshot([file("README.md")]), {"checks": [check("lint", ["format_and_lint"], 4)]})
+        changes = [
+            (("schema_version",), True), (("mode",), "executed"), (("tier",), True),
+            (("tier_name",), []), (("review_cost_score",), 101), (("review_cost_score",), True),
+            (("risk",), []), (("risk", "score"), "high"), (("risk", "signals"), [{}]),
+            (("evidence_debt",), None), (("plan", "required"), ["unknown"]),
+            (("plan", "optional"), {}), (("plan", "next_steps"), [3]),
+            (("allow_skip_required_checks",), True), (("full_ci_required",), True),
+            (("uncertainties",), {}), (("files",), None), (("files", 0, "status"), {}),
+            (("checks",), None), (("checks", 0, "required"), "yes"),
+            (("checks", 0, "selected"), "yes"), (("checks", 0, "applicable"), 0),
+            (("checks", 0, "mandatory"), []), (("checks", 0, "covers"), [None]),
+            (("checks", 0, "estimated_minutes"), "free"), (("checks", 0, "status"), {}),
+            (("checks", 0, "reasons"), [{}]), (("checks", 0, "matched_paths"), {}),
+            (("budget",), None), (("budget", "estimated_minutes"), "free"),
+            (("budget", "status"), {}), (("policy_hash",), None),
+            (("provenance",), []), (("stats", "files"), "one"),
+            (("drivers", 0, "paths"), 3), (("recommendations",), [{}]),
+        ]
+        for path, value in changes:
+            report = copy.deepcopy(original)
+            target = report
+            for part in path[:-1]:
+                target = target[part]
+            target[path[-1]] = value
+            report["report_fingerprint"] = fingerprint(report)
+            with self.subTest(path=path, value=value), self.assertRaises(ValueError):
+                allocate([report], 10)
+
+    def test_altered_saved_report_is_rejected_and_final_fingerprint_is_current(self):
+        report = analyze(snapshot([file("README.md")]), {"checks": [check("lint", ["format_and_lint"], 4)]})
+        altered = copy.deepcopy(report)
+        altered["checks"][0]["estimated_minutes"] = 0
+        with self.assertRaises(ValueError):
+            allocate([altered], 1)
+        result = allocate([report], 10)
+        self.assertEqual(result["reports"][0]["report_fingerprint"], fingerprint(result["reports"][0]))
+        self.assertNotEqual(result["reports"][0]["report_fingerprint"], report["report_fingerprint"])
+        self.assertIn("not authenticate", " ".join(result["limitations"]))
+        self.assertEqual(result, allocate(result["reports"], 10))
+
+    def test_saved_decision_flags_cannot_hide_matching_required_check(self):
+        report = analyze(snapshot([file("src/auth.py")]), {"checks": [
+            check("security", ["security_review"], 8, paths=["src/auth.py"]),
+        ]})
+        report["checks"][0].update(applicable=False, mandatory=False, selected=False, matched_paths=[])
+        report["report_fingerprint"] = fingerprint(report)
+        result = allocate([report], 1)
+        decision = result["reports"][0]["checks"][0]
+        self.assertTrue(decision["applicable"] and decision["mandatory"] and decision["selected"])
+        self.assertEqual(decision["matched_paths"], ["src/auth.py"])
+        self.assertEqual(result["budget"]["shortfall_minutes"], 7)
+
+    def test_saved_report_cannot_remove_tier_capabilities_even_with_recomputed_hash(self):
+        report = analyze(snapshot([file("src/auth.py")]), {"checks": [
+            check("security", ["security_review"], 8),
+        ]})
+        report["plan"]["required"] = ["format_and_lint"]
+        report["checks"][0].update(mandatory=False, selected=False)
+        report["report_fingerprint"] = fingerprint(report)
+        with self.assertRaises(ValueError):
+            allocate([report], 100)
+
     def test_mandatory_shortfall_is_retained_across_queue(self):
         policy = {"checks": [check("lint", ["format_and_lint"], 4), check("legal", [], 7, required=True)]}
         reports = [analyze(snapshot([file("README.md")], number=n), policy) for n in (1, 2)]

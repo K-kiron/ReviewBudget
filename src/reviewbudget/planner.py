@@ -50,8 +50,8 @@ def validate_snapshot(snapshot: dict) -> None:
             raise ValueError(f"Snapshot {key} must be text of at most 2000 characters or null.")
     if snapshot.get("synthetic") is not None and type(snapshot["synthetic"]) is not bool:
         raise ValueError("Snapshot synthetic must be a boolean or null.")
-    for key in ("head_sha", "base_sha"):
-        if snapshot.get(key) is not None and not re.fullmatch(r"[0-9a-fA-F]{40,64}", str(snapshot[key])):
+    for key in ("head_sha", "base_sha", "merge_base_sha"):
+        if snapshot.get(key) is not None and (not isinstance(snapshot[key], str) or not re.fullmatch(r"[0-9a-fA-F]{40,64}", snapshot[key])):
             raise ValueError(f"Snapshot {key} must be a commit SHA.")
     if type(snapshot.get("files_complete")) is not bool:
         raise ValueError("Snapshot files_complete must be a boolean.")
@@ -79,6 +79,32 @@ def validate_snapshot(snapshot: dict) -> None:
                 raise ValueError(f"File {key} must be a nonnegative integer.")
         if item.get("patch") is not None and not isinstance(item["patch"], str):
             raise ValueError("File patch must be text or null.")
+    _provenance(snapshot)
+
+
+def _provenance(snapshot: dict) -> dict:
+    """Keep only bounded capture labels and flags, never arbitrary local metadata."""
+    supplied = snapshot.get("provenance", {})
+    if not isinstance(supplied, dict):
+        raise ValueError("Snapshot provenance must be an object.")
+    result = {key: snapshot.get(key) for key in ("source", "synthetic", "feature_timing", "captured_at")}
+    for key in ("diff_basis", "capture_method", "state_at_capture"):
+        if key in supplied:
+            value = supplied[key]
+            if not isinstance(value, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_. -]{0,127}", value):
+                raise ValueError(f"Snapshot provenance.{key} must be a short capture label.")
+            result[key] = value
+    for key in ("working_tree_included", "number_is_placeholder"):
+        if key in supplied:
+            if type(supplied[key]) is not bool:
+                raise ValueError(f"Snapshot provenance.{key} must be a boolean.")
+            result[key] = supplied[key]
+    if "submitted_reviews_at_capture" in supplied:
+        count = supplied["submitted_reviews_at_capture"]
+        if type(count) is not int or count < 0:
+            raise ValueError("Snapshot provenance.submitted_reviews_at_capture must be a nonnegative integer.")
+        result["submitted_reviews_at_capture"] = count
+    return result
 
 
 def _is_test(path: str) -> bool:
@@ -247,12 +273,12 @@ def analyze(snapshot: dict, policy: dict | None = None) -> dict:
     if docs_only:
         drivers.append({"signal": "documentation_only", "message": "All observed paths are documentation with no sensitive path match.", "paths": []})
     checks, budget = plan_checks(files, required, not uncertainties, policy)
-    provenance = {key: snapshot.get(key) for key in ("source", "synthetic", "feature_timing", "captured_at")}
+    provenance = _provenance(snapshot)
     report = {
         "schema_version": 1,
         "repository": snapshot["repository"], "number": snapshot["number"],
         "title": snapshot.get("title") or "",
-        **provenance, "provenance": provenance,
+        **{key: snapshot.get(key) for key in ("source", "synthetic", "feature_timing", "captured_at")}, "provenance": provenance,
         "stats": {"files": len(files), "lines": loc,
                   "additions": sum(f["additions"] for f in files),
                   "deletions": sum(f["deletions"] for f in files)},
@@ -263,6 +289,7 @@ def analyze(snapshot: dict, policy: dict | None = None) -> dict:
             "signals": sorted(_categories(f["filename"], policy) | (_categories(f["previous_filename"], policy) if f.get("previous_filename") else set())),
         } for f in sorted(files, key=lambda f: f["filename"])],
         "head_sha": snapshot.get("head_sha"), "base_sha": snapshot.get("base_sha"),
+        "merge_base_sha": snapshot.get("merge_base_sha"),
         "policy_hash": hashlib.sha256(json.dumps(policy, sort_keys=True).encode()).hexdigest(),
         "mode": "advisory", "tier": tier, "tier_name": TIERS[tier],
         "risk": {"score": risk, "level": _level(risk), "signals": list(groups)},

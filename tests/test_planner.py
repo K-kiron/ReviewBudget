@@ -30,6 +30,32 @@ def file(path, **overrides):
 
 
 class PlannerTests(unittest.TestCase):
+    def test_invalid_capture_metadata_is_rejected_without_copying_it(self):
+        for overrides in [
+            {"merge_base_sha": "not-a-sha"}, {"merge_base_sha": 123},
+            {"provenance": {"diff_basis": "C:/private/path"}},
+            {"provenance": {"working_tree_included": "false"}},
+            {"provenance": {"submitted_reviews_at_capture": True}},
+            {"provenance": {"submitted_reviews_at_capture": -1}},
+        ]:
+            with self.subTest(overrides=overrides), self.assertRaises(ValueError):
+                analyze(snapshot(**overrides))
+
+    def test_local_capture_provenance_is_preserved_without_private_fields(self):
+        provenance = {"diff_basis": "merge_base", "working_tree_included": False,
+                      "number_is_placeholder": True, "capture_method": "git_diff",
+                      "submitted_reviews_at_capture": 0, "state_at_capture": "local",
+                      "directory": "C:/private/work", "credentials": "not-a-real-secret"}
+        report = analyze(snapshot(merge_base_sha="c" * 40, provenance=provenance))
+        self.assertEqual(report["merge_base_sha"], "c" * 40)
+        for key in set(provenance) - {"directory", "credentials"}:
+            self.assertEqual(report["provenance"][key], provenance[key])
+        self.assertNotIn("directory", report["provenance"])
+        self.assertNotIn("credentials", report["provenance"])
+        changed = copy.deepcopy(provenance)
+        changed["diff_basis"] = "base_to_head"
+        self.assertNotEqual(report["report_fingerprint"], analyze(snapshot(merge_base_sha="c" * 40, provenance=changed))["report_fingerprint"])
+
     def test_incomplete_input_selects_every_check_even_outside_paths_and_budget(self):
         policy = {"checks": [
             {"id": "unrelated", "name": "Unobserved service tests", "covers": [], "paths": ["services/*"], "estimated_minutes": 40},
