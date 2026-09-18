@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="400" viewBox="0 0 1200 400" role="img" aria-labelledby="title desc">
+<title id="title">ReviewBudget: spend review effort where it matters</title><desc id="desc">Explainable verification planning. Explicit checks, visible costs, required safeguards.</desc>
+<rect width="1200" height="400" fill="#f6f5ee"/><path d="M48 78H1152M48 352H1152" stroke="#d6d9cd"/>
+<g transform="translate(50 30)"><path d="m0 24 8-1v15l-8 1zm12-10 8-1v23l-8 1z" fill="#225439"/><path d="m24-1 8-1v36l-8 1z" fill="#b74419"/></g>
+<text x="97" y="56" font-family="Segoe UI,sans-serif" font-size="25" font-weight="700" fill="#202a23">ReviewBudget</text>
+<text x="1152" y="54" text-anchor="end" font-family="Consolas,monospace" font-size="12" fill="#61685d" letter-spacing="1.5">EXPLAINABLE VERIFICATION PLANNING</text>
+<text x="48" y="163" font-family="Palatino Linotype,Georgia,serif" font-size="53" fill="#202a23">Spend review effort</text><text x="48" y="224" font-family="Palatino Linotype,Georgia,serif" font-size="53" fill="#202a23">where it matters.</text>
+<text x="50" y="289" font-family="Segoe UI,sans-serif" font-size="18" fill="#61685d">Turn a pull request into an explicit check plan.</text>
+<g transform="translate(811 123)" font-family="Consolas,monospace" font-size="14"><path d="M0 0V179" stroke="#c9cfbe"/><rect x="-4" y="8" width="8" height="8" fill="#225439"/><text x="28" y="19" fill="#202a23">Explicit checks</text><rect x="-4" y="75" width="8" height="8" fill="#225439"/><text x="28" y="86" fill="#202a23">Visible costs</text><rect x="-4" y="142" width="8" height="8" fill="#b74419"/><text x="28" y="153" fill="#202a23">Required safeguards</text></g>
+<text x="50" y="378" font-family="Consolas,monospace" font-size="11" fill="#61685d">LOCAL FIRST / DETERMINISTIC / ADVISORY</text><text x="1152" y="378" text-anchor="end" font-family="Consolas,monospace" font-size="11" fill="#61685d">github.com/K-kiron/ReviewBudget</text>
+</svg>
