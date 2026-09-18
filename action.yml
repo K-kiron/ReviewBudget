@@ -1,0 +1,49 @@
+name: ReviewBudget
+description: Recommend pull request verification effort from structural risk and evidence debt.
+author: Wenhao XU
+branding:
+  icon: check-square
+  color: blue
+inputs:
+  token:
+    description: Read-only token with pull-requests read permission.
+    required: true
+    default: ${{ github.token }}
+  policy:
+    description: Optional trusted TOML policy path. Never auto-loaded from a pull request.
+    required: false
+    default: ''
+outputs:
+  tier:
+    description: Recommended verification tier, from 0 to 3.
+    value: ${{ steps.plan.outputs.tier }}
+  full-ci-required:
+    description: Whether comprehensive CI is recommended.
+    value: ${{ steps.plan.outputs.full-ci-required }}
+  human-review-required:
+    description: Whether human review is recommended.
+    value: ${{ steps.plan.outputs.human-review-required }}
+  security-review-required:
+    description: Whether security review is recommended.
+    value: ${{ steps.plan.outputs.security-review-required }}
+  input-complete:
+    description: Whether all file patches and commit identities were available.
+    value: ${{ steps.plan.outputs.input-complete }}
+  review-cost-score:
+    description: Uncalibrated review burden score from 0 to 100.
+    value: ${{ steps.plan.outputs.review-cost-score }}
+  allow-skip-required-checks:
+    description: Always false. Existing required checks must remain enabled.
+    value: ${{ steps.plan.outputs.allow-skip-required-checks }}
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+      with:
+        python-version: '3.11'
+    - id: plan
+      shell: bash
+      env:
+        REVIEWBUDGET_TOKEN: ${{ inputs.token }}
+        REVIEWBUDGET_POLICY: ${{ inputs.policy }}
+      run: python -I "$GITHUB_ACTION_PATH/src/reviewbudget/action.py"
